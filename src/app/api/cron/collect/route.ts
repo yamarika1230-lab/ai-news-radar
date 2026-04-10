@@ -180,10 +180,32 @@ export async function GET(request: Request) {
     console.log(`[cron] 重複除去後: ${unique.length}件`);
 
     // -----------------------------------------------------------------------
+    // 3.5. スコア上位30件に絞る（Claude API の処理時間を短縮）
+    // -----------------------------------------------------------------------
+    const MAX_ARTICLES = 30;
+    const prioritized =
+      unique.length > MAX_ARTICLES
+        ? [...unique]
+            .sort(
+              (a, b) =>
+                (b.score ?? 0) +
+                (b.comments ?? 0) * 2 -
+                ((a.score ?? 0) + (a.comments ?? 0) * 2),
+            )
+            .slice(0, MAX_ARTICLES)
+        : unique;
+
+    if (unique.length > MAX_ARTICLES) {
+      console.log(
+        `[cron] 上位${MAX_ARTICLES}件に絞り込み（${unique.length} → ${prioritized.length}）`,
+      );
+    }
+
+    // -----------------------------------------------------------------------
     // 4. Claude API で要約・分類・スコアリング（リトライ1回）
     // -----------------------------------------------------------------------
     const articles = await withRetry(
-      () => summarizeAndClassify(unique),
+      () => summarizeAndClassify(prioritized),
       "summarizeAndClassify",
     );
 

@@ -11,7 +11,7 @@ const client = new Anthropic({
 });
 
 const MODEL = "claude-sonnet-4-5";
-const BATCH_SIZE = 10;
+const BATCH_SIZE = 20;
 
 // ---------------------------------------------------------------------------
 // システムプロンプト
@@ -143,7 +143,7 @@ JSON配列のみを返してください。形式:
   try {
     const message = await client.messages.create({
       model: MODEL,
-      max_tokens: 4096,
+      max_tokens: 2000,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userPrompt }],
     });
@@ -247,7 +247,7 @@ export async function extractTrendingKeywords(
   try {
     const message = await client.messages.create({
       model: MODEL,
-      max_tokens: 1024,
+      max_tokens: 512,
       system: TRENDING_SYSTEM_PROMPT,
       messages: [
         {
