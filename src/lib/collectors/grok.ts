@@ -17,7 +17,13 @@ interface GrokPost {
 }
 
 function extractJsonArray(text: string): GrokPost[] {
-  // ```json ... ``` ブロックを探す
+  // 直接パース
+  try {
+    const direct = JSON.parse(text);
+    if (Array.isArray(direct)) return direct;
+  } catch { /* fall through */ }
+
+  // ```json ... ``` ブロック
   const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (codeBlockMatch) {
     try {
@@ -25,6 +31,7 @@ function extractJsonArray(text: string): GrokPost[] {
       if (Array.isArray(parsed)) return parsed;
     } catch { /* fall through */ }
   }
+
   // [...] を直接探す
   const arrayMatch = text.match(/\[[\s\S]*\]/);
   if (arrayMatch) {
@@ -33,6 +40,7 @@ function extractJsonArray(text: string): GrokPost[] {
       if (Array.isArray(parsed)) return parsed;
     } catch { /* fall through */ }
   }
+
   return [];
 }
 
@@ -80,14 +88,9 @@ const grok: Collector = {
       console.log(`[Grok] レスポンスステータス: ${res.status}`);
 
       const body = await res.text();
-      console.log(
-        `[Grok] レスポンス先頭300文字: ${body.substring(0, 300)}`,
-      );
+      console.log(`[Grok] レスポンス先頭300文字: ${body.substring(0, 300)}`);
 
-      if (!res.ok) {
-        console.log(`[Grok] HTTP ${res.status} — スキップ`);
-        return [];
-      }
+      if (!res.ok) return [];
 
       // API レスポンスの JSON パース
       let data: Record<string, unknown>;
@@ -98,7 +101,7 @@ const grok: Collector = {
         return [];
       }
 
-      // choices からテキストを抽出
+      // choices[0].message.content からテキスト取得
       const choices = data?.choices as
         | { message?: { content?: string | null }; finish_reason?: string }[]
         | undefined;
@@ -110,7 +113,7 @@ const grok: Collector = {
 
       const content = choices[0]?.message?.content;
       console.log(
-        `[Grok] finish_reason=${choices[0]?.finish_reason}, content length=${typeof content === "string" ? content.length : "N/A"}`,
+        `[Grok] content text length: ${typeof content === "string" ? content.length : "N/A"}`,
       );
 
       if (typeof content !== "string" || !content.trim()) {
@@ -136,12 +139,11 @@ const grok: Collector = {
           }));
 
         const valid = articles.filter((a) => a.url);
-        console.log(`[Grok] 完了: ${valid.length}件`);
+        console.log(`[Grok] JSON抽出成功: ${valid.length}件`);
         return valid;
       }
 
-      // JSON抽出失敗 — テキストからURL抽出を試みる
-      console.log("[Grok] JSON抽出失敗、URL抽出フォールバック");
+      // JSON失敗 → URL抽出フォールバック
       const urlRegex = /https?:\/\/(?:x\.com|twitter\.com)\/\S+/g;
       const urls = content.match(urlRegex);
 
@@ -166,7 +168,7 @@ const grok: Collector = {
       }
 
       // 最終フォールバック: テキスト全体を1件として返す
-      console.log("[Grok] テキスト全体を1件のRawArticleとして返却");
+      console.log("[Grok] テキスト全体を1件として返却");
       return [
         {
           title: "X上のAI最新動向まとめ",

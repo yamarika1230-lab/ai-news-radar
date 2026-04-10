@@ -9,7 +9,7 @@ const SUBREDDITS = [
   "ClaudeAI",
 ];
 
-const USER_AGENT = "AI-News-Radar/1.0 (by /u/ainewsradar)";
+const USER_AGENT = "Mozilla/5.0 (compatible; AI-News-Radar/1.0)";
 const TIMEOUT_MS = 10_000;
 
 interface RedditChild {
@@ -36,7 +36,7 @@ const reddit: Collector = {
 
     for (const sub of SUBREDDITS) {
       try {
-        const url = `https://www.reddit.com/r/${sub}/hot.json?limit=10&raw_json=1`;
+        const url = `https://old.reddit.com/r/${sub}/hot.json?limit=10&raw_json=1`;
         console.log(`[Reddit] リクエストURL: ${url}`);
 
         const res = await fetchWithTimeout(
@@ -45,12 +45,12 @@ const reddit: Collector = {
           TIMEOUT_MS,
         );
 
-        console.log(`[Reddit] r/${sub} レスポンスステータス: ${res.status}`);
+        console.log(`[Reddit] ${sub} response status: ${res.status}`);
 
         if (!res.ok) {
           const bodyText = await res.text().catch(() => "");
           console.log(
-            `[Reddit] r/${sub} エラー レスポンスボディ先頭200文字: ${bodyText.substring(0, 200)}`,
+            `[Reddit] ${sub} エラー (${res.status}): ${bodyText.substring(0, 200)}`,
           );
           continue;
         }
@@ -58,19 +58,17 @@ const reddit: Collector = {
         const json = await res.json();
         const children: RedditChild[] = json?.data?.children ?? [];
 
-        // ピン留め投稿とスコア0以下を除外
         const posts = children.filter(
           ({ data }) => !data.stickied && data.ups > 0,
         );
 
         console.log(
-          `[Reddit] r/${sub} 取得件数: ${posts.length} (全${children.length}件中)`,
+          `[Reddit] ${sub} 取得件数: ${posts.length} (全${children.length}件中)`,
         );
 
         if (posts.length === 0 && children.length === 0) {
-          const bodyText = JSON.stringify(json).substring(0, 200);
           console.log(
-            `[Reddit] r/${sub} 0件 — レスポンスボディ先頭200文字: ${bodyText}`,
+            `[Reddit] ${sub} 0件 — body: ${JSON.stringify(json).substring(0, 200)}`,
           );
         }
 
@@ -95,7 +93,8 @@ const reddit: Collector = {
           });
         }
       } catch (error) {
-        console.log(`[Reddit] r/${sub} 取得失敗:`, error);
+        console.log(`[Reddit] ${sub} 取得失敗:`, error);
+        // 個別のサブレディット失敗は他に影響させない
       }
     }
 

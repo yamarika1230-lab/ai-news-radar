@@ -5,6 +5,9 @@ import type { RawArticle, ProcessedArticle, TrendingKeyword } from "./types";
 // ---------------------------------------------------------------------------
 // Azure AI 経由の Anthropic クライアント
 // ---------------------------------------------------------------------------
+console.log("[Summarizer] baseURL:", process.env.ANTHROPIC_BASE_URL);
+console.log("[Summarizer] apiKey exists:", !!process.env.ANTHROPIC_API_KEY);
+
 const client = new Anthropic({
   baseURL: process.env.ANTHROPIC_BASE_URL,
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -26,72 +29,46 @@ const SYSTEM_PROMPT = `あなたは、大手コンサルティングファーム
    - 国内外の企業がAIを導入して業務を改善した具体的な事例
    - 「どの企業が」「何の業務に」「どのAIを」「どう活用して」「どんな成果を得たか」
      が分かる記事を最も高くスコアリング
-   - 例: 製造業の品質検査、金融のリスク分析、小売の需要予測、医療の画像診断 等
 
 2. 主要AIモデル・プラットフォームの重要アップデート
-   - Claude, GPT, Gemini, Llama 等の主要モデルの新バージョン・新機能
+   - Claude, GPT, Gemini, Llama 等の新バージョン・新機能
    - Azure AI, AWS Bedrock, Google Cloud Vertex AI 等のプラットフォーム更新
-   - 企業が「この新機能を使って何ができるようになるか」の観点で要約
 
 3. 実務で使えるAIツール・ソリューション
-   - 多くのユーザーのワークフローを具体的に改善・効率化するツール
-   - 「〇〇という課題に対し、このツールの新機能を使うことで、
-     △△という作業が□□のように変わる」レベルの具体性で記述
-   - 単なるUI変更や軽微な機能追加は除外
+   - ワークフローを具体的に改善・効率化するツール
 
 4. AI業界の戦略的動向
-   - 大型の資金調達、M&A、戦略提携
-   - 規制・ガバナンスの動向（AI規制法、ガイドライン等）
-   - 市場トレンドの変化
-
-■ 除外するもの
-- イベント告知、セミナー案内、ウェビナーの募集
-- 期間限定の割引、セール、キャンペーン情報
-- AIに直接関連しない人事異動や決算発表
-- 個人的な意見表明、ポエム的な未来予測
-- 学術論文で、実務への応用が不明確なもの
+   - 大型の資金調達、M&A、戦略提携、規制・ガバナンス
 
 ■ カテゴリ分類
-各記事を以下のいずれかに分類してください:
 - "enterprise": 企業のAI導入・活用事例、業界動向（最重要カテゴリ）
 - "llm": LLMモデルの新規リリース、アップデート、ベンチマーク比較
 - "tools": AIツール、サービス、フレームワークの実務活用
 - "tips": AIの具体的な活用方法、プロンプト技術、業務効率化のノウハウ
 - "other": 上記に該当しないAI関連ニュース
 
-■ スコアリング基準（0-100の整数）
-以下の基準で総合スコアを採点:
+■ スコアリング基準（0-100の整数、必ず1以上を返すこと）
 - クライアント提案への活用度（40%）
-- 速報性・新規性（20%）
 - 具体性・実用性（25%）
+- 速報性・新規性（20%）
 - 業界への影響度（15%）
 
-■ ソース別のスコア調整ガイドライン
-PR TIMES、日経クロステック、ITmedia、Google News から取得した
-企業のAI導入事例や製品発表のニュースは、"enterprise"カテゴリに
-分類して高めのスコア（70以上）を付けてください。
-arXivの学術論文で実務応用が不明確なものはスコアを低め（50以下）にしてください。
+PR TIMES、日経クロステック、Google News の企業AI導入事例は enterprise で70以上。
+arXivの学術論文で実務応用不明確なものは50以下。
 
 ■ 出力形式
 各記事について以下のJSON形式で返してください:
 
-- title: 日本語のタイトル（★必ず日本語で出力すること★）
-  英語の記事は自然な日本語に翻訳する。
-  「誰が/何が、何をしたか」が一目でわかる具体的なタイトルにする。
-  固有名詞（Claude, GPT, Google等）はそのまま英語でOK。
-  悪い例: "Thinking In The Agent Age"（英語のまま、内容不明）
-  良い例: "OpenAI、エージェント型AIの新フレームワークを発表 — 自律的なタスク実行が可能に"
-
+- title: 日本語のタイトル（★絶対に日本語で出力すること。英語のタイトルは禁止★）
+  英語の記事は自然な日本語に翻訳する。固有名詞（Claude, GPT等）は英語のままでOK。
+  悪い例: "Thinking In The Agent Age"
+  良い例: "OpenAI、エージェント型AIの新フレームワークを発表"
 - summary: 日本語の要約（150-250文字）
-  「誰が/何が、どうなったか」の事実を客観的に記述。
+- category: 上記カテゴリのいずれか
+- score: 総合スコア（1-100の整数）
+- originalLanguage: "en" または "ja" または "other"
 
-- category: 上記のカテゴリ
-
-- score: 上記基準による総合スコア（必ず0-100の整数を返すこと。0は使わない）
-
-- originalLanguage: 元記事の言語（"en" または "ja" または "other"）
-
-出力は純粋なJSONのみ。マークダウンのコードブロックや説明文は含めないでください。`;
+出力は純粋なJSONのみ。`;
 
 // ---------------------------------------------------------------------------
 // ヘルパー
@@ -117,7 +94,6 @@ function validateCategory(
   );
 }
 
-/** 配列を size 件ずつに分割 */
 function chunk<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < arr.length; i += size) {
@@ -126,9 +102,15 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return chunks;
 }
 
-/** JSON配列を安全に抽出 */
-function extractJsonArray(text: string): unknown[] | null {
-  // ```json ... ``` ブロック
+/** JSON配列を堅牢にパース */
+function parseClaudeResponse(text: string): unknown[] {
+  // 1. 直接パース
+  try {
+    const direct = JSON.parse(text);
+    if (Array.isArray(direct)) return direct;
+  } catch { /* fall through */ }
+
+  // 2. ```json ... ``` ブロック
   const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (codeBlockMatch) {
     try {
@@ -136,7 +118,8 @@ function extractJsonArray(text: string): unknown[] | null {
       if (Array.isArray(parsed)) return parsed;
     } catch { /* fall through */ }
   }
-  // [...] を直接探す
+
+  // 3. [...] を探す
   const arrayMatch = text.match(/\[[\s\S]*\]/);
   if (arrayMatch) {
     try {
@@ -144,10 +127,41 @@ function extractJsonArray(text: string): unknown[] | null {
       if (Array.isArray(parsed)) return parsed;
     } catch { /* fall through */ }
   }
-  return null;
+
+  console.log(
+    "[Summarizer] JSON parse completely failed. Raw text:",
+    text.substring(0, 500),
+  );
+  return [];
 }
 
-/** API 呼び出し失敗時のフォールバック変換 */
+/** タイトルとソースからカテゴリを簡易推定 */
+function guessCategory(article: RawArticle): ProcessedArticle["category"] {
+  const text = `${article.title} ${article.content}`.toLowerCase();
+  if (text.match(/導入|活用|採用|enterprise|業務|production|deploy|事例/))
+    return "enterprise";
+  if (text.match(/gpt|claude|gemini|llama|model|benchmark|パラメータ|リリース/))
+    return "llm";
+  if (text.match(/tool|ツール|sdk|api|framework|launch|オープンソース/))
+    return "tools";
+  if (text.match(/tips|プロンプト|使い方|tutorial|how to|活用法/))
+    return "tips";
+  return "other";
+}
+
+/** スコアを簡易推定 */
+function guessScore(article: RawArticle): number {
+  let score = 50;
+  if (article.score && article.score > 100) score += 15;
+  else if (article.score && article.score > 10) score += 5;
+  if (article.comments && article.comments > 50) score += 10;
+  if (article.source === "Google News" || article.source === "PR TIMES (AI)")
+    score += 10;
+  if (article.source === "arXiv") score -= 10;
+  return Math.min(100, Math.max(1, score));
+}
+
+/** API失敗時のフォールバック（カテゴリ・スコア推定付き） */
 function toFallback(article: RawArticle): ProcessedArticle {
   return {
     id: generateId(article.url),
@@ -155,8 +169,8 @@ function toFallback(article: RawArticle): ProcessedArticle {
     url: article.url,
     source: article.source,
     summary: "",
-    category: "other",
-    score: 50,
+    category: guessCategory(article),
+    score: guessScore(article),
     publishedAt: article.publishedAt,
     collectedAt: new Date().toISOString(),
     originalLanguage: /^[A-Za-z]/.test(article.title) ? "en" : "ja",
@@ -164,7 +178,7 @@ function toFallback(article: RawArticle): ProcessedArticle {
 }
 
 // ---------------------------------------------------------------------------
-// バッチ単位の記事テキスト生成
+// バッチ処理
 // ---------------------------------------------------------------------------
 
 function buildArticlesText(
@@ -188,10 +202,6 @@ function buildArticlesText(
     .join("\n\n");
 }
 
-// ---------------------------------------------------------------------------
-// バッチ1回分の API 呼び出し + パース
-// ---------------------------------------------------------------------------
-
 interface ClaudeResult {
   index: number;
   title: string;
@@ -209,16 +219,20 @@ async function processBatch(
 
   const userPrompt = `以下の ${batch.length} 件の記事を分析してください。
 indexフィールドには各記事の番号をそのまま使用してください。
-titleは必ず日本語にしてください（英語のままにしないこと）。
-scoreは必ず1-100の整数を返してください（0は不可）。
+★重要: titleは絶対に日本語で出力すること。英語の記事タイトルを翻訳すること。
+★重要: scoreは1-100の整数を返すこと。categoryはenterprise/llm/tools/tips/otherのいずれか。
 
 記事一覧:
 ${articlesText}
 
 JSON配列のみを返してください。形式:
-[{"index":${offset},"title":"日本語タイトル","summary":"...","category":"...","score":65,"originalLanguage":"en"}, ...]`;
+[{"index":${offset},"title":"日本語タイトル","summary":"日本語要約","category":"enterprise","score":75,"originalLanguage":"en"}, ...]`;
 
   try {
+    console.log(
+      `[Summarizer] API呼び出し開始: model=${MODEL}, batch offset=${offset}, count=${batch.length}`,
+    );
+
     const message = await client.messages.create({
       model: MODEL,
       max_tokens: 2000,
@@ -226,37 +240,37 @@ JSON配列のみを返してください。形式:
       messages: [{ role: "user", content: userPrompt }],
     });
 
+    console.log("[Summarizer] API response received");
+
     const block = message.content[0];
     if (block.type !== "text") {
       console.log(
-        `[summarizer] バッチ offset=${offset}: text以外のレスポンス`,
+        `[Summarizer] バッチ offset=${offset}: text以外のレスポンス type=${block.type}`,
       );
       return batch.map((a) => toFallback(a));
     }
 
     const responseText = block.text.trim();
     console.log(
-      `[summarizer] Claude APIレスポンス先頭500文字: ${responseText.substring(0, 500)}`,
+      `[Summarizer] response text (first 300 chars): ${responseText.substring(0, 300)}`,
     );
 
-    // JSON 配列を安全に抽出
-    const parsed = extractJsonArray(responseText);
+    // JSON パース
+    console.log("[Summarizer] attempting to parse JSON...");
+    const results = parseClaudeResponse(responseText) as ClaudeResult[];
 
-    if (!parsed) {
-      console.log(
-        `[summarizer] JSONパース失敗 — レスポンス全文(先頭800文字): ${responseText.substring(0, 800)}`,
-      );
+    if (results.length === 0) {
+      console.log("[Summarizer] parse returned 0 results — using fallback");
       return batch.map((a) => toFallback(a));
     }
 
-    const results = parsed as ClaudeResult[];
-    console.log(`[summarizer] パース結果件数: ${results.length}`);
+    console.log(`[Summarizer] parsed ${results.length} articles`);
 
     return batch.map((article, i) => {
       const idx = offset + i;
       const info = results.find((r) => r.index === idx);
 
-      const score = info?.score ?? 50;
+      const score = info?.score ?? guessScore(article);
       const lang = info?.originalLanguage?.toLowerCase();
       const originalLanguage: ProcessedArticle["originalLanguage"] =
         lang === "en" ? "en" : lang === "ja" ? "ja" : "other";
@@ -267,7 +281,9 @@ JSON配列のみを返してください。形式:
         url: article.url,
         source: article.source,
         summary: info?.summary ?? "",
-        category: validateCategory(info?.category),
+        category: validateCategory(info?.category) !== "other"
+          ? validateCategory(info?.category)
+          : guessCategory(article),
         score: Math.min(100, Math.max(1, score)),
         publishedAt: article.publishedAt,
         collectedAt: new Date().toISOString(),
@@ -275,10 +291,9 @@ JSON配列のみを返してください。形式:
       };
     });
   } catch (error) {
-    console.log(
-      `[summarizer] バッチ offset=${offset} 処理失敗:`,
-      error instanceof Error ? error.message : error,
-    );
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.log(`[Summarizer] バッチ offset=${offset} 処理失敗:`, errMsg);
+    console.log("[Summarizer] フォールバックでカテゴリ・スコア推定を使用");
     return batch.map((a) => toFallback(a));
   }
 }
@@ -293,7 +308,10 @@ export async function summarizeAndClassify(
   if (rawArticles.length === 0) return [];
 
   console.log(
-    `[summarizer] ${rawArticles.length}件を${BATCH_SIZE}件ずつ処理開始`,
+    `[Summarizer] ${rawArticles.length}件を${BATCH_SIZE}件ずつ処理開始`,
+  );
+  console.log(
+    `[Summarizer] 環境変数確認 — baseURL: ${process.env.ANTHROPIC_BASE_URL ?? "未設定"}, apiKey: ${process.env.ANTHROPIC_API_KEY ? "設定済み" : "未設定"}`,
   );
 
   const batches = chunk(rawArticles, BATCH_SIZE);
@@ -302,7 +320,7 @@ export async function summarizeAndClassify(
   for (let b = 0; b < batches.length; b++) {
     const offset = b * BATCH_SIZE;
     console.log(
-      `[summarizer] バッチ ${b + 1}/${batches.length} (${batches[b].length}件)`,
+      `[Summarizer] バッチ ${b + 1}/${batches.length} (${batches[b].length}件)`,
     );
     const processed = await processBatch(batches[b], offset);
     results.push(...processed);
@@ -316,7 +334,7 @@ export async function summarizeAndClassify(
     scoreSum += a.score;
   }
   console.log(
-    `[summarizer] 処理完了: ${results.length}件, 平均スコア=${(scoreSum / results.length).toFixed(0)}, カテゴリ=${JSON.stringify(catCounts)}`,
+    `[Summarizer] 処理完了: ${results.length}件, 平均スコア=${(scoreSum / results.length).toFixed(0)}, カテゴリ=${JSON.stringify(catCounts)}`,
   );
 
   return results;
@@ -332,12 +350,10 @@ const TRENDING_SYSTEM_PROMPT = `あなたはAI/テクノロジーニュースの
 以下の条件で上位10件を抽出:
 - 技術用語、プロダクト名、企業名、コンセプト名を対象
 - 一般的すぎる単語（AI, tech, new 等）は除外
-- 複合語も可（例: "RAG", "Claude 4", "Apple Intelligence"）
-- change: 前日比の変化率を推定（例: "+350%", "+120%", "new"）
-  初回はソーシャルスコアやコメント数から推定した仮値でOK
+- change: 前日比の変化率を推定（仮値でOK）
 - hot: 特に注目度が高いものは true
 
-出力は純粋なJSONのみ。マークダウンのコードブロックや説明文は含めないでください。`;
+出力は純粋なJSONのみ。`;
 
 export async function extractTrendingKeywords(
   articles: ProcessedArticle[],
@@ -372,9 +388,7 @@ JSON配列のみを返してください。形式:
     const block = message.content[0];
     if (block.type !== "text") return [];
 
-    const parsed = extractJsonArray(block.text.trim());
-    if (!parsed) return [];
-
+    const parsed = parseClaudeResponse(block.text.trim());
     return (parsed as TrendingKeyword[])
       .filter(
         (k) =>
@@ -384,7 +398,7 @@ JSON配列のみを返してください。形式:
       )
       .slice(0, 10);
   } catch (error) {
-    console.log(`[summarizer] トレンドキーワード抽出失敗:`, error);
+    console.log("[Summarizer] トレンドキーワード抽出失敗:", error);
     return [];
   }
 }
