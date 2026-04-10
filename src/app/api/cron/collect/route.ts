@@ -54,6 +54,42 @@ function deduplicateByUrl(articles: RawArticle[]): RawArticle[] {
 }
 
 // ---------------------------------------------------------------------------
+// ソースごとの記事数バランス調整
+// ---------------------------------------------------------------------------
+
+function balanceBySource(
+  articles: RawArticle[],
+  limits: Record<string, number>,
+): RawArticle[] {
+  const bySource: Record<string, RawArticle[]> = {};
+  for (const a of articles) {
+    const key = a.source;
+    if (!bySource[key]) bySource[key] = [];
+    bySource[key].push(a);
+  }
+
+  const result: RawArticle[] = [];
+  for (const [source, items] of Object.entries(bySource)) {
+    const limit = limits[source] ?? 5; // デフォルト5件
+    // スコア順でソートして上位を選定
+    const sorted = [...items].sort(
+      (a, b) =>
+        (b.score ?? 0) + (b.comments ?? 0) * 2 -
+        ((a.score ?? 0) + (a.comments ?? 0) * 2),
+    );
+    const selected = sorted.slice(0, limit);
+    result.push(...selected);
+    if (items.length > limit) {
+      console.log(
+        `[cron] ${source}: ${items.length} → ${selected.length}件に制限`,
+      );
+    }
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Claude API リトライラッパー（1回リトライ）
 // ---------------------------------------------------------------------------
 
@@ -180,12 +216,28 @@ export async function GET(request: Request) {
     console.log(`[cron] 重複除去後: ${unique.length}件`);
 
     // -----------------------------------------------------------------------
-    // 3.5. スコア上位30件に絞る（Claude API の処理時間を短縮）
+    // 3.5. ソースごとの上限を適用してバランスを調整
     // -----------------------------------------------------------------------
-    const MAX_ARTICLES = 30;
+    const SOURCE_LIMITS: Record<string, number> = {
+      HackerNews: 5,
+      Reddit: 5,
+      ProductHunt: 3,
+      GitHub: 5,
+      arXiv: 5,
+      "RSS/Blogs": 10,
+      "Google News": 10,
+    };
+
+    const balanced = balanceBySource(unique, SOURCE_LIMITS);
+    console.log(
+      `[cron] ソースバランス調整: ${unique.length} → ${balanced.length}件`,
+    );
+
+    // さらに全体で最大40件に絞る（スコア順）
+    const MAX_ARTICLES = 40;
     const prioritized =
-      unique.length > MAX_ARTICLES
-        ? [...unique]
+      balanced.length > MAX_ARTICLES
+        ? [...balanced]
             .sort(
               (a, b) =>
                 (b.score ?? 0) +
@@ -193,9 +245,9 @@ export async function GET(request: Request) {
                 ((a.score ?? 0) + (a.comments ?? 0) * 2),
             )
             .slice(0, MAX_ARTICLES)
-        : unique;
+        : balanced;
 
-    if (unique.length > MAX_ARTICLES) {
+    if (balanced.length > MAX_ARTICLES) {
       console.log(
         `[cron] 上位${MAX_ARTICLES}件に絞り込み（${unique.length} → ${prioritized.length}）`,
       );

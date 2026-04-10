@@ -1,45 +1,43 @@
-import { NextResponse } from "next/server";
-import grok from "@/lib/collectors/grok";
-
 export async function GET() {
-  const startTime = Date.now();
+  const apiKey = process.env.XAI_API_KEY;
 
-  // 15秒の全体タイムアウト
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15_000);
+  // 環境変数チェック
+  if (!apiKey) {
+    return Response.json({ error: "XAI_API_KEY is not set" });
+  }
 
   try {
-    const result = await Promise.race([
-      grok.collect(),
-      new Promise<never>((_, reject) => {
-        controller.signal.addEventListener("abort", () =>
-          reject(new Error("Test timeout (15s)")),
-        );
-      }),
-    ]);
-
-    clearTimeout(timer);
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-
-    return NextResponse.json({
-      success: true,
-      collector: grok.name,
-      count: result.length,
-      elapsedSeconds: Number(elapsed),
-      articles: result,
-    });
-  } catch (error) {
-    clearTimeout(timer);
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-
-    return NextResponse.json(
-      {
-        success: false,
-        collector: grok.name,
-        error: error instanceof Error ? error.message : "Unknown error",
-        elapsedSeconds: Number(elapsed),
+    const response = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
       },
-      { status: 500 },
-    );
+      body: JSON.stringify({
+        model: "grok-3-mini-fast",
+        messages: [
+          {
+            role: "user",
+            content:
+              "直近24時間のAI関連の重要ニュースを3件だけ教えてください。各項目はtitle, summary, urlを含むJSON配列で返してください。",
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+
+    const status = response.status;
+    const body = await response.text();
+
+    return Response.json({
+      apiKeyPrefix: apiKey.substring(0, 8) + "...",
+      responseStatus: status,
+      responseBody: body.substring(0, 2000),
+    });
+  } catch (error: unknown) {
+    return Response.json({
+      apiKeyPrefix: apiKey.substring(0, 8) + "...",
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
