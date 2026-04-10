@@ -1,7 +1,7 @@
 import type { Collector, RawArticle } from "../types";
 
 const TIMEOUT_MS = 15_000;
-const QUERY_DELAY_MS = 500;
+const QUERY_DELAY_MS = 300;
 const MAX_RESULTS = 20;
 
 interface Tweet {
@@ -28,11 +28,16 @@ interface XUser {
 // ---------------------------------------------------------------------------
 
 const QUERIES = [
-  "AI活用 事例 -is:retweet -is:reply lang:ja",
-  "Claude Code -is:retweet -is:reply lang:ja",
-  "(ChatGPT OR GPT) 活用 -is:retweet -is:reply lang:ja",
-  "(AI OR LLM) 効率化 -is:retweet -is:reply lang:ja",
-  "(OpenAI OR Anthropic OR Google) AI -is:retweet -is:reply lang:en",
+  "AI -is:retweet -is:reply lang:ja",
+  "ChatGPT -is:retweet -is:reply lang:ja",
+  "Claude -is:retweet -is:reply lang:ja",
+  "LLM -is:retweet -is:reply lang:ja",
+  "生成AI -is:retweet -is:reply lang:ja",
+  "AIツール -is:retweet -is:reply lang:ja",
+  "AI導入 -is:retweet -is:reply lang:ja",
+  "プロンプト -is:retweet -is:reply lang:ja",
+  "OpenAI -is:retweet -is:reply lang:en",
+  "Anthropic Claude -is:retweet -is:reply lang:en",
 ];
 
 // ---------------------------------------------------------------------------
@@ -150,16 +155,16 @@ const xApi: Collector = {
 
     console.log(`[X API] 全クエリ合計: ${allTweets.length}件（重複除去済み）`);
 
-    // いいね数10以上でフィルタし、降順ソート、上位N件
+    // いいね数5以上でフィルタし、降順ソート、上位N件
     const filtered = allTweets
-      .filter((t) => (t.public_metrics?.like_count || 0) >= 10)
+      .filter((t) => (t.public_metrics?.like_count || 0) >= 5)
       .sort(
         (a, b) =>
           (b.public_metrics?.like_count || 0) -
           (a.public_metrics?.like_count || 0),
       );
 
-    console.log(`[X API] いいね10以上: ${filtered.length}件`);
+    console.log(`[X API] いいね5以上: ${filtered.length}件`);
     const top = filtered.slice(0, MAX_RESULTS);
 
     const articles: RawArticle[] = top.map((tweet) => {
