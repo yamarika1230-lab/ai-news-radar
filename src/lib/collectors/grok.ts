@@ -5,7 +5,7 @@ const MODEL = "grok-3-mini-fast";
 const TIMEOUT_MS = 20_000;
 
 // ---------------------------------------------------------------------------
-// Grok API リクエスト（search_parameters によるビルトイン検索）
+// JSON配列の安全な抽出
 // ---------------------------------------------------------------------------
 
 interface GrokPost {
@@ -15,6 +15,30 @@ interface GrokPost {
   content?: string;
   title?: string;
 }
+
+function extractJsonArray(text: string): GrokPost[] {
+  // ```json ... ``` ブロックを探す
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlockMatch) {
+    try {
+      const parsed = JSON.parse(codeBlockMatch[1].trim());
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* fall through */ }
+  }
+  // [...] を直接探す
+  const arrayMatch = text.match(/\[[\s\S]*\]/);
+  if (arrayMatch) {
+    try {
+      const parsed = JSON.parse(arrayMatch[0]);
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* fall through */ }
+  }
+  return [];
+}
+
+// ---------------------------------------------------------------------------
+// Collector
+// ---------------------------------------------------------------------------
 
 const grok: Collector = {
   name: "X (Grok)",
@@ -65,7 +89,7 @@ const grok: Collector = {
         return [];
       }
 
-      // JSON パース
+      // API レスポンスの JSON パース
       let data: Record<string, unknown>;
       try {
         data = JSON.parse(body);
@@ -84,117 +108,79 @@ const grok: Collector = {
         return [];
       }
 
-      const textContent = choices[0]?.message?.content;
+      const content = choices[0]?.message?.content;
       console.log(
-        `[Grok] finish_reason=${choices[0]?.finish_reason}, content length=${typeof textContent === "string" ? textContent.length : "N/A"}`,
+        `[Grok] finish_reason=${choices[0]?.finish_reason}, content length=${typeof content === "string" ? content.length : "N/A"}`,
       );
 
-      if (typeof textContent !== "string" || !textContent.trim()) {
+      if (typeof content !== "string" || !content.trim()) {
         console.log("[Grok] テキスト content が空");
         return [];
       }
 
-      // JSON 配列を抽出してパース（最大10件）
-      const articles = parseGrokResponse(textContent).slice(0, 10);
-      const valid = articles.filter((a) => a.url);
-      console.log(`[Grok] 完了: ${valid.length}件`);
-      return valid;
+      // JSON 配列を抽出
+      const posts = extractJsonArray(content);
+      console.log(`[Grok] extractJsonArray結果: ${posts.length}件`);
+
+      if (posts.length > 0) {
+        const articles = posts
+          .filter((p) => p.title || p.summary || p.content)
+          .slice(0, 10)
+          .map((p) => ({
+            title: p.title ?? p.summary?.slice(0, 100) ?? "",
+            url: p.url ?? "",
+            source: "X (Grok)",
+            content: p.summary ?? p.content ?? "",
+            publishedAt: new Date().toISOString(),
+            metadata: { author: p.author },
+          }));
+
+        const valid = articles.filter((a) => a.url);
+        console.log(`[Grok] 完了: ${valid.length}件`);
+        return valid;
+      }
+
+      // JSON抽出失敗 — テキストからURL抽出を試みる
+      console.log("[Grok] JSON抽出失敗、URL抽出フォールバック");
+      const urlRegex = /https?:\/\/(?:x\.com|twitter\.com)\/\S+/g;
+      const urls = content.match(urlRegex);
+
+      if (urls && urls.length > 0) {
+        const lines = content.split("\n").filter((l) => l.trim());
+        const articles: RawArticle[] = urls.slice(0, 10).map((url) => {
+          const lineIdx = lines.findIndex((l) => l.includes(url));
+          const titleLine =
+            lineIdx > 0
+              ? lines[lineIdx - 1].replace(/^[\d.\-*]+\s*/, "").trim()
+              : "";
+          return {
+            title: titleLine || url,
+            url,
+            source: "X (Grok)",
+            content: "",
+            publishedAt: new Date().toISOString(),
+          };
+        });
+        console.log(`[Grok] URL抽出フォールバック: ${articles.length}件`);
+        return articles;
+      }
+
+      // 最終フォールバック: テキスト全体を1件として返す
+      console.log("[Grok] テキスト全体を1件のRawArticleとして返却");
+      return [
+        {
+          title: "X上のAI最新動向まとめ",
+          url: "https://x.com",
+          source: "X (Grok)",
+          content: content.slice(0, 500),
+          publishedAt: new Date().toISOString(),
+        },
+      ];
     } catch (error) {
       console.log("[Grok] 収集失敗:", error);
       return [];
     }
   },
 };
-
-// ---------------------------------------------------------------------------
-// レスポンスパース
-// ---------------------------------------------------------------------------
-
-function parseGrokResponse(text: string): RawArticle[] {
-  // JSON 配列の抽出を試行
-  try {
-    const jsonStr =
-      text.match(/```(?:json)?\s*([\s\S]*?)```/)?.[1]?.trim() ??
-      text.match(/(\[[\s\S]*\])/)?.[1] ??
-      text;
-
-    const posts: GrokPost[] = JSON.parse(jsonStr);
-    if (!Array.isArray(posts)) {
-      console.log(`[Grok] パース結果が配列ではない: ${typeof posts}`);
-      return fallbackParse(text);
-    }
-
-    console.log(`[Grok] JSONパース成功: ${posts.length}件`);
-
-    return posts
-      .filter((p) => p.title || p.summary || p.content)
-      .map((p) => ({
-        title: p.title ?? p.summary?.slice(0, 100) ?? "",
-        url: p.url ?? "",
-        source: "X (Grok)",
-        content: p.summary ?? p.content ?? "",
-        publishedAt: new Date().toISOString(),
-        metadata: { author: p.author },
-      }));
-  } catch (error) {
-    console.log(`[Grok] JSONパース失敗: ${error}`);
-    return fallbackParse(text);
-  }
-}
-
-/**
- * JSON パースに失敗した場合のフォールバック:
- * テキストからURL行を抽出して記事を構成する
- */
-function fallbackParse(text: string): RawArticle[] {
-  console.log("[Grok] フォールバックパースを試行");
-
-  const urlRegex = /https?:\/\/(?:x\.com|twitter\.com)\/\S+/g;
-  const urls = text.match(urlRegex);
-  if (!urls || urls.length === 0) {
-    console.log("[Grok] フォールバック: URLが見つからず");
-    return [];
-  }
-
-  // テキストを行単位で分割し、各URLの前後のテキストを要約として取得
-  const lines = text.split("\n").filter((l) => l.trim());
-  const articles: RawArticle[] = [];
-
-  for (const url of urls) {
-    const lineIdx = lines.findIndex((l) => l.includes(url));
-    // URL を含む行の前の行をタイトル候補に
-    const titleLine =
-      lineIdx > 0
-        ? lines[lineIdx - 1].replace(/^[\d\.\-\*]+\s*/, "").trim()
-        : "";
-    const title = titleLine || url;
-
-    articles.push({
-      title,
-      url,
-      source: "X (Grok)",
-      content: "",
-      publishedAt: new Date().toISOString(),
-    });
-  }
-
-  console.log(`[Grok] URL抽出フォールバック: ${articles.length}件`);
-
-  // URLが1件も見つからなければテキスト全体を1記事として返す
-  if (articles.length === 0) {
-    console.log("[Grok] テキスト全体を1記事として返却");
-    return [
-      {
-        title: text.split("\n").find((l) => l.trim())?.slice(0, 100) ?? "X (Grok) まとめ",
-        url: "",
-        source: "X (Grok)",
-        content: text.slice(0, 500),
-        publishedAt: new Date().toISOString(),
-      },
-    ];
-  }
-
-  return articles;
-}
 
 export default grok;

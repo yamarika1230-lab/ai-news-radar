@@ -61,31 +61,35 @@ const SYSTEM_PROMPT = `あなたは、大手コンサルティングファーム
 
 ■ スコアリング基準（0-100の整数）
 以下の基準で総合スコアを採点:
-- クライアント提案への活用度（40%）:
-  コンサルタントがクライアントに「御社でもこのように活用できます」と
-  提案する際のネタになるか
-- 速報性・新規性（20%）: 新しい情報か、既知の話題の焼き直しでないか
-- 具体性・実用性（25%）:
-  「誰が、何に、どう使って、どんな成果」が明確か
-- 業界への影響度（15%）: 業界全体のトレンドを左右する規模か
+- クライアント提案への活用度（40%）
+- 速報性・新規性（20%）
+- 具体性・実用性（25%）
+- 業界への影響度（15%）
+
+■ ソース別のスコア調整ガイドライン
+PR TIMES、日経クロステック、ITmedia、Google News から取得した
+企業のAI導入事例や製品発表のニュースは、"enterprise"カテゴリに
+分類して高めのスコア（70以上）を付けてください。
+arXivの学術論文で実務応用が不明確なものはスコアを低め（50以下）にしてください。
 
 ■ 出力形式
 各記事について以下のJSON形式で返してください:
-- title: 日本語のタイトル（元が英語の場合は自然な日本語に翻訳）
-  専門家でなくても重要性が一目でわかる、簡潔で具体的なタイトルにする
+
+- title: 日本語のタイトル（★必ず日本語で出力すること★）
+  英語の記事は自然な日本語に翻訳する。
+  「誰が/何が、何をしたか」が一目でわかる具体的なタイトルにする。
+  固有名詞（Claude, GPT, Google等）はそのまま英語でOK。
+  悪い例: "Thinking In The Agent Age"（英語のまま、内容不明）
+  良い例: "OpenAI、エージェント型AIの新フレームワークを発表 — 自律的なタスク実行が可能に"
+
 - summary: 日本語の要約（150-250文字）
   「誰が/何が、どうなったか」の事実を客観的に記述。
-  その結果、ユーザーや企業にどのような具体的な変化や可能性が生まれたかを説明。
-  個人的な憶測や長期的な未来予測は不要。
-- category: 上記のカテゴリ
-- score: 上記基準による総合スコア
 
-■ ソース別のスコア調整ガイドライン
-特に、PR TIMES、日経クロステック、ITmedia、Google News から取得した
-企業のAI導入事例や製品発表のニュースは、"enterprise"カテゴリに
-分類して高めのスコア（70以上）を付けてください。
-一方、arXivの学術論文で実務応用が不明確なものは
-スコアを低め（50以下）にしてください。
+- category: 上記のカテゴリ
+
+- score: 上記基準による総合スコア（必ず0-100の整数を返すこと。0は使わない）
+
+- originalLanguage: 元記事の言語（"en" または "ja" または "other"）
 
 出力は純粋なJSONのみ。マークダウンのコードブロックや説明文は含めないでください。`;
 
@@ -122,11 +126,29 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return chunks;
 }
 
+/** JSON配列を安全に抽出 */
+function extractJsonArray(text: string): unknown[] | null {
+  // ```json ... ``` ブロック
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlockMatch) {
+    try {
+      const parsed = JSON.parse(codeBlockMatch[1].trim());
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* fall through */ }
+  }
+  // [...] を直接探す
+  const arrayMatch = text.match(/\[[\s\S]*\]/);
+  if (arrayMatch) {
+    try {
+      const parsed = JSON.parse(arrayMatch[0]);
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* fall through */ }
+  }
+  return null;
+}
+
 /** API 呼び出し失敗時のフォールバック変換 */
-function toFallback(
-  article: RawArticle,
-  batchOffset: number,
-): ProcessedArticle {
+function toFallback(article: RawArticle): ProcessedArticle {
   return {
     id: generateId(article.url),
     title: article.title,
@@ -134,9 +156,10 @@ function toFallback(
     source: article.source,
     summary: "",
     category: "other",
-    score: 0,
+    score: 50,
     publishedAt: article.publishedAt,
     collectedAt: new Date().toISOString(),
+    originalLanguage: /^[A-Za-z]/.test(article.title) ? "en" : "ja",
   };
 }
 
@@ -175,6 +198,7 @@ interface ClaudeResult {
   summary: string;
   category: string;
   score: number;
+  originalLanguage?: string;
 }
 
 async function processBatch(
@@ -185,12 +209,14 @@ async function processBatch(
 
   const userPrompt = `以下の ${batch.length} 件の記事を分析してください。
 indexフィールドには各記事の番号をそのまま使用してください。
+titleは必ず日本語にしてください（英語のままにしないこと）。
+scoreは必ず1-100の整数を返してください（0は不可）。
 
 記事一覧:
 ${articlesText}
 
 JSON配列のみを返してください。形式:
-[{"index":${offset},"title":"...","summary":"...","category":"...","score":0}, ...]`;
+[{"index":${offset},"title":"日本語タイトル","summary":"...","category":"...","score":65,"originalLanguage":"en"}, ...]`;
 
   try {
     const message = await client.messages.create({
@@ -202,22 +228,38 @@ JSON配列のみを返してください。形式:
 
     const block = message.content[0];
     if (block.type !== "text") {
-      console.log(`[summarizer] バッチ offset=${offset}: text以外のレスポンス`);
-      return batch.map((a, i) => toFallback(a, offset + i));
+      console.log(
+        `[summarizer] バッチ offset=${offset}: text以外のレスポンス`,
+      );
+      return batch.map((a) => toFallback(a));
     }
 
-    // JSON を抽出（コードブロックで囲まれていても対応）
-    const text = block.text.trim();
-    const jsonStr =
-      text.match(/```(?:json)?\s*([\s\S]*?)```/)?.[1]?.trim() ??
-      text.match(/(\[[\s\S]*\])/)?.[1] ??
-      text;
+    const responseText = block.text.trim();
+    console.log(
+      `[summarizer] Claude APIレスポンス先頭500文字: ${responseText.substring(0, 500)}`,
+    );
 
-    const results: ClaudeResult[] = JSON.parse(jsonStr);
+    // JSON 配列を安全に抽出
+    const parsed = extractJsonArray(responseText);
+
+    if (!parsed) {
+      console.log(
+        `[summarizer] JSONパース失敗 — レスポンス全文(先頭800文字): ${responseText.substring(0, 800)}`,
+      );
+      return batch.map((a) => toFallback(a));
+    }
+
+    const results = parsed as ClaudeResult[];
+    console.log(`[summarizer] パース結果件数: ${results.length}`);
 
     return batch.map((article, i) => {
       const idx = offset + i;
       const info = results.find((r) => r.index === idx);
+
+      const score = info?.score ?? 50;
+      const lang = info?.originalLanguage?.toLowerCase();
+      const originalLanguage: ProcessedArticle["originalLanguage"] =
+        lang === "en" ? "en" : lang === "ja" ? "ja" : "other";
 
       return {
         id: generateId(article.url),
@@ -226,14 +268,18 @@ JSON配列のみを返してください。形式:
         source: article.source,
         summary: info?.summary ?? "",
         category: validateCategory(info?.category),
-        score: Math.min(100, Math.max(0, info?.score ?? 0)),
+        score: Math.min(100, Math.max(1, score)),
         publishedAt: article.publishedAt,
         collectedAt: new Date().toISOString(),
+        originalLanguage,
       };
     });
   } catch (error) {
-    console.log(`[summarizer] バッチ offset=${offset} 処理失敗:`, error);
-    return batch.map((a, i) => toFallback(a, offset + i));
+    console.log(
+      `[summarizer] バッチ offset=${offset} 処理失敗:`,
+      error instanceof Error ? error.message : error,
+    );
+    return batch.map((a) => toFallback(a));
   }
 }
 
@@ -253,7 +299,6 @@ export async function summarizeAndClassify(
   const batches = chunk(rawArticles, BATCH_SIZE);
   const results: ProcessedArticle[] = [];
 
-  // バッチを順次処理（API レート制限に配慮）
   for (let b = 0; b < batches.length; b++) {
     const offset = b * BATCH_SIZE;
     console.log(
@@ -263,7 +308,17 @@ export async function summarizeAndClassify(
     results.push(...processed);
   }
 
-  console.log(`[summarizer] 処理完了: ${results.length}件`);
+  // 統計ログ
+  const catCounts: Record<string, number> = {};
+  let scoreSum = 0;
+  for (const a of results) {
+    catCounts[a.category] = (catCounts[a.category] ?? 0) + 1;
+    scoreSum += a.score;
+  }
+  console.log(
+    `[summarizer] 処理完了: ${results.length}件, 平均スコア=${(scoreSum / results.length).toFixed(0)}, カテゴリ=${JSON.stringify(catCounts)}`,
+  );
+
   return results;
 }
 
@@ -317,16 +372,10 @@ JSON配列のみを返してください。形式:
     const block = message.content[0];
     if (block.type !== "text") return [];
 
-    const text = block.text.trim();
-    const jsonStr =
-      text.match(/```(?:json)?\s*([\s\S]*?)```/)?.[1]?.trim() ??
-      text.match(/(\[[\s\S]*\])/)?.[1] ??
-      text;
+    const parsed = extractJsonArray(block.text.trim());
+    if (!parsed) return [];
 
-    const parsed: TrendingKeyword[] = JSON.parse(jsonStr);
-
-    // バリデーション
-    return parsed
+    return (parsed as TrendingKeyword[])
       .filter(
         (k) =>
           typeof k.keyword === "string" &&

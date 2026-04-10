@@ -21,6 +21,7 @@ export interface ProcessedArticle {
   score: number;
   publishedAt: string;
   collectedAt: string;
+  originalLanguage?: "en" | "ja" | "other";
 }
 
 /** トレンドキーワード */

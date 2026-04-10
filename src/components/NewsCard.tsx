@@ -34,7 +34,10 @@ const SOURCE_STYLE: Record<string, string> = {
   OpenAI: "#10A37F",
   "Google AI": "#4285F4",
   "Meta AI": "#0668E1",
-  Mistral: "#F7D046",
+  "Google News": "#4285F4",
+  "X (Grok)": "#1DA1F2",
+  "PR TIMES (AI)": "#0075C2",
+  "日経クロステック": "#C41A30",
 };
 
 // ---------------------------------------------------------------------------
@@ -61,6 +64,9 @@ export default function NewsCard({ article }: { article: ProcessedArticle }) {
 
   const cat = CATEGORY_STYLE[article.category] ?? CATEGORY_STYLE.other;
   const sourceColor = SOURCE_STYLE[article.source] ?? "#6B6B68";
+  const isEnglish =
+    article.originalLanguage === "en" ||
+    (!article.originalLanguage && /^[A-Za-z]/.test(article.title));
 
   return (
     <article className="rounded-2xl bg-white shadow-sm transition-shadow hover:shadow-md">
@@ -80,6 +86,14 @@ export default function NewsCard({ article }: { article: ProcessedArticle }) {
         <div className="min-w-0 flex-1">
           <h3 className="text-[15px] font-semibold leading-snug text-[#2D2D2D]">
             {article.title}
+            {isEnglish && (
+              <span
+                className="ml-1.5 inline-block align-middle text-xs opacity-60"
+                title="英語の記事"
+              >
+                🌐
+              </span>
+            )}
           </h3>
 
           <div className="mt-2 flex flex-wrap items-center gap-2">
