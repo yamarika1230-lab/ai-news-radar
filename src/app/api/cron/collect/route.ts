@@ -5,7 +5,8 @@ import producthunt from "@/lib/collectors/producthunt";
 import githubTrending from "@/lib/collectors/github-trending";
 import arxiv from "@/lib/collectors/arxiv";
 import rssBlogs from "@/lib/collectors/rss-blogs";
-import grok from "@/lib/collectors/grok";
+// import grok from "@/lib/collectors/grok"; // Grok → X API に置き換え
+import xApi from "@/lib/collectors/x-api";
 import serpapi from "@/lib/collectors/serpapi";
 import { fetchGoogleTrends } from "@/lib/collectors/serpapi";
 import { summarizeAndClassify, extractTrendingKeywords } from "@/lib/summarizer";
@@ -24,7 +25,7 @@ const collectors: Collector[] = [
   githubTrending,
   arxiv,
   rssBlogs,
-  grok,
+  xApi,
   serpapi,
 ];
 
@@ -44,11 +45,20 @@ function isAuthorized(request: Request): boolean {
 // ---------------------------------------------------------------------------
 
 function deduplicateByUrl(articles: RawArticle[]): RawArticle[] {
-  const seen = new Set<string>();
+  const seenUrls = new Set<string>();
+  const seenTitles: string[] = [];
+
   return articles.filter((a) => {
-    const normalized = a.url.split("?")[0].replace(/\/+$/, "").toLowerCase();
-    if (seen.has(normalized)) return false;
-    seen.add(normalized);
+    // URL 重複チェック
+    const normalizedUrl = a.url.split("?")[0].replace(/\/+$/, "").toLowerCase();
+    if (seenUrls.has(normalizedUrl)) return false;
+    seenUrls.add(normalizedUrl);
+
+    // タイトル類似度チェック（先頭30文字が同一なら重複とみなす）
+    const titleKey = a.title.substring(0, 30).toLowerCase().replace(/\s+/g, "");
+    if (titleKey.length > 10 && seenTitles.some((t) => t === titleKey)) return false;
+    seenTitles.push(titleKey);
+
     return true;
   });
 }
@@ -226,7 +236,7 @@ export async function GET(request: Request) {
       arXiv: 5,
       "RSS/Blogs": 10,
       "Google News": 10,
-      "X (Grok)": 10,
+      X: 10,
     };
 
     const balanced = balanceBySource(unique, SOURCE_LIMITS);
