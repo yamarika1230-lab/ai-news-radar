@@ -5,10 +5,9 @@ import producthunt from "@/lib/collectors/producthunt";
 import githubTrending from "@/lib/collectors/github-trending";
 import arxiv from "@/lib/collectors/arxiv";
 import rssBlogs from "@/lib/collectors/rss-blogs";
-// Phase 2 コレクター — Grok APIハング問題のため一時無効化
-// import grok from "@/lib/collectors/grok";
-// import serpapi from "@/lib/collectors/serpapi";
-// import { fetchGoogleTrends } from "@/lib/collectors/serpapi";
+// import grok from "@/lib/collectors/grok"; // Phase 2: Grok APIハング問題のため無効化
+import serpapi from "@/lib/collectors/serpapi";
+import { fetchGoogleTrends } from "@/lib/collectors/serpapi";
 import { summarizeAndClassify, extractTrendingKeywords } from "@/lib/summarizer";
 import { saveDailyDigest, updateSourceStatus } from "@/lib/storage";
 import type { Collector, RawArticle, SourceStatus, TrendingKeyword } from "@/lib/types";
@@ -25,8 +24,8 @@ const collectors: Collector[] = [
   githubTrending,
   arxiv,
   rssBlogs,
-  // grok,     // Phase 2: 一時無効化（APIハング問題）
-  // serpapi,   // Phase 2: 一時無効化（APIハング問題）
+  // grok,   // Phase 2: Grok APIハング問題のため無効化
+  serpapi,
 ];
 
 // ---------------------------------------------------------------------------
@@ -151,9 +150,13 @@ export async function GET(request: Request) {
     // -----------------------------------------------------------------------
     // 2. 全コレクターを並列実行 + Google Trends
     // -----------------------------------------------------------------------
-    // Phase 2 の fetchGoogleTrends は一時無効化
-    const serpTrends: TrendingKeyword[] = [];
-    const collectorResults = await runCollectorsWithTimeout(collectors);
+    const [collectorResults, serpTrends] = await Promise.all([
+      runCollectorsWithTimeout(collectors),
+      fetchGoogleTrends().catch((err) => {
+        console.log("[cron] Google Trends 取得失敗:", err);
+        return [] as TrendingKeyword[];
+      }),
+    ]);
 
     // 結果を結合
     const allRaw: RawArticle[] = [];

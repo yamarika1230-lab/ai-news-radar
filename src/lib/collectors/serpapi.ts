@@ -64,7 +64,8 @@ async function collectWithGoogleNews(
     const newsResults = ((data as Record<string, unknown>).news_results ?? []) as SerpNewsResult[];
     console.log(`[SerpApi] news_results: ${newsResults.length}件`);
 
-    return mapToArticles(newsResults);
+    // 10件に制限
+    return mapToArticles(newsResults.slice(0, 10));
   } catch (error) {
     console.log("[SerpApi] google_news 失敗:", error);
     return [];
