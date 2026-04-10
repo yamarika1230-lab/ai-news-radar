@@ -5,9 +5,12 @@ import producthunt from "@/lib/collectors/producthunt";
 import githubTrending from "@/lib/collectors/github-trending";
 import arxiv from "@/lib/collectors/arxiv";
 import rssBlogs from "@/lib/collectors/rss-blogs";
+import grok from "@/lib/collectors/grok";
+import serpapi from "@/lib/collectors/serpapi";
+import { fetchGoogleTrends } from "@/lib/collectors/serpapi";
 import { summarizeAndClassify, extractTrendingKeywords } from "@/lib/summarizer";
 import { saveDailyDigest, updateSourceStatus } from "@/lib/storage";
-import type { Collector, RawArticle, SourceStatus } from "@/lib/types";
+import type { Collector, RawArticle, SourceStatus, TrendingKeyword } from "@/lib/types";
 import dayjs from "dayjs";
 
 // ---------------------------------------------------------------------------
@@ -21,6 +24,8 @@ const collectors: Collector[] = [
   githubTrending,
   arxiv,
   rssBlogs,
+  grok,
+  serpapi,
 ];
 
 // ---------------------------------------------------------------------------
@@ -82,38 +87,45 @@ export async function GET(request: Request) {
   try {
     // -----------------------------------------------------------------------
     // 2. 全コレクターを並列実行（Promise.allSettled）
+    //    + SerpApi Google Trends も並列で取得
     // -----------------------------------------------------------------------
-    const settled = await Promise.allSettled(
-      collectors.map(async (collector) => {
-        try {
-          const articles = await collector.collect();
-          await updateSourceStatus({
-            name: collector.name,
-            status: articles.length > 0 ? "ok" : "warn",
-            count: articles.length,
-            lastRun: new Date().toISOString(),
-          });
-          return { name: collector.name, articles };
-        } catch (error) {
-          console.log(`[cron] ${collector.name} 収集失敗:`, error);
-          await updateSourceStatus({
-            name: collector.name,
-            status: "error",
-            count: 0,
-            lastRun: new Date().toISOString(),
-          });
-          // エラーを握りつぶし、空結果として扱う
-          return { name: collector.name, articles: [] as RawArticle[] };
-        }
+    const [settled, serpTrends] = await Promise.all([
+      Promise.allSettled(
+        collectors.map(async (collector) => {
+          try {
+            const articles = await collector.collect();
+            await updateSourceStatus({
+              name: collector.name,
+              status: articles.length > 0 ? "ok" : "warn",
+              count: articles.length,
+              lastRun: new Date().toISOString(),
+            });
+            return { name: collector.name, articles };
+          } catch (error) {
+            console.log(`[cron] ${collector.name} 収集失敗:`, error);
+            await updateSourceStatus({
+              name: collector.name,
+              status: "error",
+              count: 0,
+              lastRun: new Date().toISOString(),
+            });
+            // エラーを握りつぶし、空結果として扱う
+            return { name: collector.name, articles: [] as RawArticle[] };
+          }
+        }),
+      ),
+      // SerpApi Google Trends（失敗しても空配列）
+      fetchGoogleTrends().catch((err) => {
+        console.log("[cron] Google Trends 取得失敗:", err);
+        return [] as TrendingKeyword[];
       }),
-    );
+    ]);
 
     // 成功したソースの結果を結合
     const allRaw: RawArticle[] = [];
     const sourceResults: Record<string, { status: string; count: number }> = {};
 
     for (const result of settled) {
-      // allSettled なので fulfilled のみ（catch 内で return しているため全て fulfilled）
       if (result.status === "fulfilled") {
         const { name, articles } = result.value;
         allRaw.push(...articles);
@@ -141,12 +153,25 @@ export async function GET(request: Request) {
     );
 
     // -----------------------------------------------------------------------
-    // 5. トレンドキーワード抽出（リトライ1回）
+    // 5. トレンドキーワード:
+    //    SerpApi の結果があればそれを優先、なければ Claude API で推定
     // -----------------------------------------------------------------------
-    const trendingKeywords = await withRetry(
-      () => extractTrendingKeywords(articles),
-      "extractTrendingKeywords",
-    );
+    let trendingKeywords: TrendingKeyword[];
+
+    if (serpTrends.length > 0) {
+      console.log(
+        `[cron] トレンドキーワード: SerpApi Google Trends を使用 (${serpTrends.length}件)`,
+      );
+      trendingKeywords = serpTrends;
+    } else {
+      console.log(
+        "[cron] トレンドキーワード: SerpApi 結果なし — Claude API で推定",
+      );
+      trendingKeywords = await withRetry(
+        () => extractTrendingKeywords(articles),
+        "extractTrendingKeywords",
+      );
+    }
 
     // -----------------------------------------------------------------------
     // 6. ソースステータスを集計
@@ -189,6 +214,7 @@ export async function GET(request: Request) {
         processed: articles.length,
       },
       trendingKeywords: trendingKeywords.length,
+      trendingSource: serpTrends.length > 0 ? "google_trends" : "claude",
       sources: sourceResults,
       elapsedSeconds: Number(elapsed),
     });
