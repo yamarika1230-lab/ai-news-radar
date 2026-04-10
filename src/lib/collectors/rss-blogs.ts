@@ -1,12 +1,24 @@
 import Parser from "rss-parser";
 import type { Collector, RawArticle } from "../types";
 
+const AI_KEYWORDS =
+  /\b(AI|人工知能|LLM|機械学習|深層学習|生成AI|ChatGPT|Claude|GPT|Gemini|Copilot)\b/i;
+
 const RSS_FEEDS = [
   { name: "Anthropic", url: "https://www.anthropic.com/rss.xml" },
   { name: "OpenAI", url: "https://openai.com/blog/rss.xml" },
   { name: "Google AI", url: "https://blog.google/technology/ai/rss/" },
   { name: "Meta AI", url: "https://ai.meta.com/blog/rss/" },
-  { name: "Mistral", url: "https://mistral.ai/news/rss.xml" },
+  {
+    name: "PR TIMES (AI)",
+    url: "https://prtimes.jp/topics/keyword/AI/feed",
+    filter: true,
+  },
+  {
+    name: "日経クロステック",
+    url: "https://xtech.nikkei.com/rss/index.rdf",
+    filter: true,
+  },
 ];
 
 // 48時間のカットオフ
@@ -26,6 +38,7 @@ const rssBlogs: Collector = {
     for (const feed of RSS_FEEDS) {
       try {
         const parsed = await parser.parseURL(feed.url);
+        let count = 0;
 
         for (const item of parsed.items ?? []) {
           const pubDate = item.isoDate ?? item.pubDate;
@@ -33,6 +46,17 @@ const rssBlogs: Collector = {
 
           // 48時間以内の記事のみ
           if (new Date(pubDate).getTime() < cutoff) continue;
+
+          // フィルタ対象フィードはAI関連キーワードでフィルタリング
+          if (
+            "filter" in feed &&
+            feed.filter &&
+            !AI_KEYWORDS.test(
+              `${item.title ?? ""} ${item.contentSnippet ?? ""}`,
+            )
+          ) {
+            continue;
+          }
 
           articles.push({
             title: item.title ?? "",
@@ -46,10 +70,11 @@ const rssBlogs: Collector = {
               guid: item.guid,
             },
           });
+          count++;
         }
 
         console.log(
-          `[RSS/Blogs] ${feed.name}: ${parsed.items?.length ?? 0}件中フィルタ後取得`,
+          `[RSS/Blogs] ${feed.name}: ${count}件取得 (全${parsed.items?.length ?? 0}件中)`,
         );
       } catch (error) {
         console.log(`[RSS/Blogs] ${feed.name} 取得失敗:`, error);
