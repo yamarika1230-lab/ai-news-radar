@@ -5,15 +5,8 @@ const AI_KEYWORDS =
   /\b(AI|人工知能|LLM|機械学習|深層学習|生成AI|ChatGPT|Claude|GPT|Gemini|Copilot)\b/i;
 
 const RSS_FEEDS = [
-  { name: "Anthropic", url: "https://www.anthropic.com/rss.xml" },
   { name: "OpenAI", url: "https://openai.com/blog/rss.xml" },
   { name: "Google AI", url: "https://blog.google/technology/ai/rss/" },
-  { name: "Meta AI", url: "https://ai.meta.com/blog/rss/" },
-  {
-    name: "PR TIMES (AI)",
-    url: "https://prtimes.jp/topics/keyword/AI/feed",
-    filter: true,
-  },
   {
     name: "日経クロステック",
     url: "https://xtech.nikkei.com/rss/index.rdf",

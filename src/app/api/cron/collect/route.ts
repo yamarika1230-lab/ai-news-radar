@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import hackernews from "@/lib/collectors/hackernews";
-import reddit from "@/lib/collectors/reddit";
+// import reddit from "@/lib/collectors/reddit"; // VercelのIPがRedditにブロックされるため無効化
 import producthunt from "@/lib/collectors/producthunt";
 import githubTrending from "@/lib/collectors/github-trending";
 import arxiv from "@/lib/collectors/arxiv";
@@ -20,7 +20,7 @@ import dayjs from "dayjs";
 
 const collectors: Collector[] = [
   hackernews,
-  reddit,
+  // reddit, // 無効化（Vercel IPブロック）
   producthunt,
   githubTrending,
   arxiv,
@@ -230,13 +230,12 @@ export async function GET(request: Request) {
     // -----------------------------------------------------------------------
     const SOURCE_LIMITS: Record<string, number> = {
       HackerNews: 5,
-      Reddit: 5,
-      ProductHunt: 3,
+      ProductHunt: 4,
       GitHub: 5,
       arXiv: 5,
       "RSS/Blogs": 10,
-      "Google News": 10,
-      X: 10,
+      "Google News": 8,
+      X: 20,
     };
 
     const balanced = balanceBySource(unique, SOURCE_LIMITS);
@@ -267,10 +266,18 @@ export async function GET(request: Request) {
     // -----------------------------------------------------------------------
     // 4. Claude API で要約・分類・スコアリング（リトライ1回）
     // -----------------------------------------------------------------------
-    const articles = await withRetry(
+    const allArticles = await withRetry(
       () => summarizeAndClassify(prioritized),
       "summarizeAndClassify",
     );
+
+    // スコア20以下の低品質記事を除外
+    const articles = allArticles.filter((a) => a.score > 20);
+    if (allArticles.length !== articles.length) {
+      console.log(
+        `[cron] スコアフィルタ: ${allArticles.length} → ${articles.length}件（スコア20以下を${allArticles.length - articles.length}件除外）`,
+      );
+    }
 
     // -----------------------------------------------------------------------
     // 5. トレンドキーワード:

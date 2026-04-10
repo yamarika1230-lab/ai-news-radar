@@ -28,16 +28,11 @@ interface XUser {
 // ---------------------------------------------------------------------------
 
 const QUERIES = [
-  // AI活用事例・企業導入
-  "AI活用 導入 事例 min_faves:100 -is:retweet -is:reply lang:ja",
-  // Claude Code関連
-  "Claude Code min_faves:50 -is:retweet -is:reply lang:ja",
-  // ChatGPT・LLM活用
-  "(ChatGPT OR GPT) 活用 min_faves:100 -is:retweet -is:reply lang:ja",
-  // AIツール・効率化
-  "(AI OR LLM) (効率化 OR 自動化 OR 生産性) min_faves:50 -is:retweet -is:reply lang:ja",
-  // AI最新ニュース（英語圏の大きなニュース）
-  "(OpenAI OR Anthropic OR Google AI) (launch OR release OR announce) min_faves:500 -is:retweet -is:reply lang:en",
+  "AI活用 事例 -is:retweet -is:reply lang:ja",
+  "Claude Code -is:retweet -is:reply lang:ja",
+  "(ChatGPT OR GPT) 活用 -is:retweet -is:reply lang:ja",
+  "(AI OR LLM) 効率化 -is:retweet -is:reply lang:ja",
+  "(OpenAI OR Anthropic OR Google) AI -is:retweet -is:reply lang:en",
 ];
 
 // ---------------------------------------------------------------------------
@@ -155,14 +150,17 @@ const xApi: Collector = {
 
     console.log(`[X API] 全クエリ合計: ${allTweets.length}件（重複除去済み）`);
 
-    // いいね数で降順ソートし上位N件を返す
-    const sorted = allTweets.sort(
-      (a, b) =>
-        (b.public_metrics?.like_count || 0) -
-        (a.public_metrics?.like_count || 0),
-    );
+    // いいね数10以上でフィルタし、降順ソート、上位N件
+    const filtered = allTweets
+      .filter((t) => (t.public_metrics?.like_count || 0) >= 10)
+      .sort(
+        (a, b) =>
+          (b.public_metrics?.like_count || 0) -
+          (a.public_metrics?.like_count || 0),
+      );
 
-    const top = sorted.slice(0, MAX_RESULTS);
+    console.log(`[X API] いいね10以上: ${filtered.length}件`);
+    const top = filtered.slice(0, MAX_RESULTS);
 
     const articles: RawArticle[] = top.map((tweet) => {
       const username = userMap.get(tweet.author_id) || "unknown";
