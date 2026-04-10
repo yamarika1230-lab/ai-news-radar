@@ -20,55 +20,48 @@ const BATCH_SIZE = 20;
 // システムプロンプト
 // ---------------------------------------------------------------------------
 const SYSTEM_PROMPT = `あなたは、大手コンサルティングファームのAIリサーチアナリストです。
-以下の記事データを分析し、コンサルタントがクライアントへの提案に
-活用できる実践的なインテリジェンスを抽出してください。
-
-■ 選定基準（重要度順）
-
-1. 企業のAI導入・活用事例（最優先）
-   - 国内外の企業がAIを導入して業務を改善した具体的な事例
-   - 「どの企業が」「何の業務に」「どのAIを」「どう活用して」「どんな成果を得たか」
-     が分かる記事を最も高くスコアリング
-
-2. 主要AIモデル・プラットフォームの重要アップデート
-   - Claude, GPT, Gemini, Llama 等の新バージョン・新機能
-   - Azure AI, AWS Bedrock, Google Cloud Vertex AI 等のプラットフォーム更新
-
-3. 実務で使えるAIツール・ソリューション
-   - ワークフローを具体的に改善・効率化するツール
-
-4. AI業界の戦略的動向
-   - 大型の資金調達、M&A、戦略提携、規制・ガバナンス
+記事データを分析し、コンサルタントがクライアントへの提案に活用できるインテリジェンスを抽出してください。
 
 ■ カテゴリ分類
-- "enterprise": 企業のAI導入・活用事例、業界動向（最重要カテゴリ）
-- "llm": LLMモデルの新規リリース、アップデート、ベンチマーク比較
+- "enterprise": 企業のAI導入・活用事例、業界動向（最重要）
+- "llm": LLMモデルの新規リリース、アップデート、ベンチマーク
 - "tools": AIツール、サービス、フレームワークの実務活用
-- "tips": AIの具体的な活用方法、プロンプト技術、業務効率化のノウハウ
+- "tips": AI活用方法、プロンプト技術、業務効率化ノウハウ
 - "other": 上記に該当しないAI関連ニュース
 
-■ スコアリング基準（0-100の整数、必ず1以上を返すこと）
+■ スコアリング基準（1-100の整数。必ず1以上）
 - クライアント提案への活用度（40%）
 - 具体性・実用性（25%）
 - 速報性・新規性（20%）
 - 業界への影響度（15%）
+PR TIMES / 日経クロステック / Google News の企業AI事例は enterprise で70以上。
+arXiv論文で実務応用不明確なものは50以下。
 
-PR TIMES、日経クロステック、Google News の企業AI導入事例は enterprise で70以上。
-arXivの学術論文で実務応用不明確なものは50以下。
+★★★ 最重要ルール: titleは必ず日本語で出力すること ★★★
+英語の記事タイトルをそのまま返すことは絶対に禁止。必ず日本語に翻訳すること。
+固有名詞（Claude, GPT, Google, OpenAI等の企業名・製品名）は英語のままでOK。
+それ以外は全て日本語にすること。
+
+具体例:
+- NG: "CyberAgent moves faster with ChatGPT Enterprise and Codex"
+  OK: "サイバーエージェント、ChatGPT EnterpriseとCodexで業務効率化を加速"
+- NG: "The next phase of enterprise AI"
+  OK: "OpenAI、エンタープライズAIの次なるフェーズを提示 — 企業向けAI戦略の新方針"
+- NG: "Thinking In The Agent Age"
+  OK: "エージェント時代の到来 — AI自律型エージェントが変える働き方"
+- NG: "Show HN: Open source alternative to Cursor"
+  OK: "Cursorのオープンソース代替ツールが登場 — HackerNewsで話題に"
 
 ■ 出力形式
-各記事について以下のJSON形式で返してください:
+各記事について以下のJSONで返してください:
+- index: 記事の番号（整数）
+- title: 日本語タイトル
+- summary: 日本語要約（150-250文字）
+- category: カテゴリ
+- score: 総合スコア（1-100）
+- originalLanguage: "en" / "ja" / "other"
 
-- title: 日本語のタイトル（★絶対に日本語で出力すること。英語のタイトルは禁止★）
-  英語の記事は自然な日本語に翻訳する。固有名詞（Claude, GPT等）は英語のままでOK。
-  悪い例: "Thinking In The Agent Age"
-  良い例: "OpenAI、エージェント型AIの新フレームワークを発表"
-- summary: 日本語の要約（150-250文字）
-- category: 上記カテゴリのいずれか
-- score: 総合スコア（1-100の整数）
-- originalLanguage: "en" または "ja" または "other"
-
-出力は純粋なJSONのみ。`;
+出力は純粋なJSON配列のみ。`;
 
 // ---------------------------------------------------------------------------
 // ヘルパー
@@ -161,7 +154,7 @@ function guessScore(article: RawArticle): number {
   return Math.min(100, Math.max(1, score));
 }
 
-/** API失敗時のフォールバック（カテゴリ・スコア推定付き） */
+/** API失敗時のフォールバック */
 function toFallback(article: RawArticle): ProcessedArticle {
   return {
     id: generateId(article.url),
@@ -195,19 +188,18 @@ function buildArticlesText(
       ];
       if (a.content) lines.push(`Content: ${a.content.slice(0, 300)}`);
       if (a.score !== undefined) lines.push(`Score: ${a.score}`);
-      if (a.comments !== undefined)
-        lines.push(`Comments: ${a.comments}`);
+      if (a.comments !== undefined) lines.push(`Comments: ${a.comments}`);
       return lines.join("\n");
     })
     .join("\n\n");
 }
 
 interface ClaudeResult {
-  index: number;
+  index: number | string;
   title: string;
   summary: string;
   category: string;
-  score: number;
+  score: number | string;
   originalLanguage?: string;
 }
 
@@ -218,9 +210,9 @@ async function processBatch(
   const articlesText = buildArticlesText(batch, offset);
 
   const userPrompt = `以下の ${batch.length} 件の記事を分析してください。
-indexフィールドには各記事の番号をそのまま使用してください。
-★重要: titleは絶対に日本語で出力すること。英語の記事タイトルを翻訳すること。
-★重要: scoreは1-100の整数を返すこと。categoryはenterprise/llm/tools/tips/otherのいずれか。
+indexフィールドには各記事の番号（整数）をそのまま使用してください。
+★絶対に: titleは日本語で出力。英語のタイトルは翻訳すること。
+★絶対に: scoreは1-100の整数。categoryはenterprise/llm/tools/tips/otherのいずれか。
 
 記事一覧:
 ${articlesText}
@@ -230,7 +222,7 @@ JSON配列のみを返してください。形式:
 
   try {
     console.log(
-      `[Summarizer] API呼び出し開始: model=${MODEL}, batch offset=${offset}, count=${batch.length}`,
+      `[Summarizer] API呼び出し: model=${MODEL}, offset=${offset}, count=${batch.length}`,
     );
 
     const message = await client.messages.create({
@@ -244,47 +236,67 @@ JSON配列のみを返してください。形式:
 
     const block = message.content[0];
     if (block.type !== "text") {
-      console.log(
-        `[Summarizer] バッチ offset=${offset}: text以外のレスポンス type=${block.type}`,
-      );
+      console.log(`[Summarizer] text以外のレスポンス: ${block.type}`);
       return batch.map((a) => toFallback(a));
     }
 
     const responseText = block.text.trim();
     console.log(
-      `[Summarizer] response text (first 300 chars): ${responseText.substring(0, 300)}`,
+      `[Summarizer] response text (first 500 chars): ${responseText.substring(0, 500)}`,
     );
 
-    // JSON パース
-    console.log("[Summarizer] attempting to parse JSON...");
     const results = parseClaudeResponse(responseText) as ClaudeResult[];
 
     if (results.length === 0) {
-      console.log("[Summarizer] parse returned 0 results — using fallback");
+      console.log("[Summarizer] parse returned 0 — using fallback");
       return batch.map((a) => toFallback(a));
     }
 
     console.log(`[Summarizer] parsed ${results.length} articles`);
 
+    // デバッグ: 最初の結果のindex型を確認
+    if (results.length > 0) {
+      const first = results[0];
+      console.log(
+        `[Summarizer] first result: index=${first.index}(${typeof first.index}), title="${(first.title ?? "").substring(0, 40)}", score=${first.score}(${typeof first.score}), category=${first.category}`,
+      );
+    }
+
+    // index マッチング: 位置ベースのフォールバック付き
     return batch.map((article, i) => {
       const idx = offset + i;
-      const info = results.find((r) => r.index === idx);
 
-      const score = info?.score ?? guessScore(article);
+      // indexの型が string/number どちらでもマッチ
+      let info = results.find(
+        (r) => Number(r.index) === idx,
+      );
+
+      // indexマッチに失敗した場合、配列位置でマッチ
+      if (!info && i < results.length) {
+        info = results[i];
+        if (info && i === 0) {
+          console.log(
+            `[Summarizer] index不一致 — 位置ベースマッチにフォールバック (idx=${idx}, result.index=${info.index})`,
+          );
+        }
+      }
+
+      const score = info?.score != null ? Number(info.score) : guessScore(article);
+      const category = info?.category
+        ? validateCategory(info.category)
+        : guessCategory(article);
       const lang = info?.originalLanguage?.toLowerCase();
       const originalLanguage: ProcessedArticle["originalLanguage"] =
         lang === "en" ? "en" : lang === "ja" ? "ja" : "other";
 
       return {
         id: generateId(article.url),
-        title: info?.title ?? article.title,
+        title: info?.title || article.title,
         url: article.url,
         source: article.source,
         summary: info?.summary ?? "",
-        category: validateCategory(info?.category) !== "other"
-          ? validateCategory(info?.category)
-          : guessCategory(article),
-        score: Math.min(100, Math.max(1, score)),
+        category,
+        score: Math.min(100, Math.max(1, score || 50)),
         publishedAt: article.publishedAt,
         collectedAt: new Date().toISOString(),
         originalLanguage,
@@ -292,8 +304,7 @@ JSON配列のみを返してください。形式:
     });
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.log(`[Summarizer] バッチ offset=${offset} 処理失敗:`, errMsg);
-    console.log("[Summarizer] フォールバックでカテゴリ・スコア推定を使用");
+    console.log(`[Summarizer] parse error: ${errMsg}`);
     return batch.map((a) => toFallback(a));
   }
 }
@@ -309,9 +320,6 @@ export async function summarizeAndClassify(
 
   console.log(
     `[Summarizer] ${rawArticles.length}件を${BATCH_SIZE}件ずつ処理開始`,
-  );
-  console.log(
-    `[Summarizer] 環境変数確認 — baseURL: ${process.env.ANTHROPIC_BASE_URL ?? "未設定"}, apiKey: ${process.env.ANTHROPIC_API_KEY ? "設定済み" : "未設定"}`,
   );
 
   const batches = chunk(rawArticles, BATCH_SIZE);
@@ -334,7 +342,7 @@ export async function summarizeAndClassify(
     scoreSum += a.score;
   }
   console.log(
-    `[Summarizer] 処理完了: ${results.length}件, 平均スコア=${(scoreSum / results.length).toFixed(0)}, カテゴリ=${JSON.stringify(catCounts)}`,
+    `[Summarizer] 完了: ${results.length}件, 平均スコア=${(scoreSum / results.length).toFixed(0)}, カテゴリ=${JSON.stringify(catCounts)}`,
   );
 
   return results;
@@ -344,16 +352,9 @@ export async function summarizeAndClassify(
 // メインエクスポート: extractTrendingKeywords
 // ---------------------------------------------------------------------------
 
-const TRENDING_SYSTEM_PROMPT = `あなたはAI/テクノロジーニュースのアナリストです。
-与えられた記事のタイトルと要約からトレンドキーワードを抽出してください。
-
-以下の条件で上位10件を抽出:
-- 技術用語、プロダクト名、企業名、コンセプト名を対象
-- 一般的すぎる単語（AI, tech, new 等）は除外
-- change: 前日比の変化率を推定（仮値でOK）
-- hot: 特に注目度が高いものは true
-
-出力は純粋なJSONのみ。`;
+const TRENDING_SYSTEM_PROMPT = `トレンドキーワードを抽出してください。
+上位10件、技術用語/プロダクト名/企業名を対象。
+出力は純粋なJSON配列のみ。`;
 
 export async function extractTrendingKeywords(
   articles: ProcessedArticle[],
@@ -362,8 +363,7 @@ export async function extractTrendingKeywords(
 
   const inputText = articles
     .map(
-      (a, i) =>
-        `[${i}] ${a.title}\n要約: ${a.summary}\nScore: ${a.score}`,
+      (a, i) => `[${i}] ${a.title}\n要約: ${a.summary}\nScore: ${a.score}`,
     )
     .join("\n\n");
 
@@ -375,12 +375,10 @@ export async function extractTrendingKeywords(
       messages: [
         {
           role: "user",
-          content: `以下の${articles.length}件の記事からトレンドキーワードを抽出してください。
-
+          content: `以下の${articles.length}件からトレンドキーワードを抽出。
 ${inputText}
 
-JSON配列のみを返してください。形式:
-[{"keyword":"...","change":"+N%","hot":true}, ...]`,
+JSON配列で返してください: [{"keyword":"...","change":"+N%","hot":true}, ...]`,
         },
       ],
     });
