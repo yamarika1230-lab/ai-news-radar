@@ -1,125 +1,5 @@
 import type { Collector, RawArticle } from "../types";
 
-const GROK_API_URL = "https://api.x.ai/v1/chat/completions";
-const MODEL = "grok-3-mini-fast";
-const TIMEOUT_MS = 20_000;
-
-// ---------------------------------------------------------------------------
-// レスポンスパース
-// ---------------------------------------------------------------------------
-
-interface GrokItem {
-  [key: string]: unknown;
-}
-
-function parseGrokResponse(content: string): RawArticle[] {
-  // 方法1: 直接パース
-  try {
-    const parsed = JSON.parse(content);
-    if (Array.isArray(parsed)) {
-      console.log(`[Grok] 直接JSONパース成功: ${parsed.length}件`);
-      return mapItems(parsed);
-    }
-  } catch { /* fall through */ }
-
-  // 方法2: ```json ... ``` ブロック
-  const codeBlock = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlock) {
-    try {
-      const parsed = JSON.parse(codeBlock[1].trim());
-      if (Array.isArray(parsed)) {
-        console.log(`[Grok] コードブロックパース成功: ${parsed.length}件`);
-        return mapItems(parsed);
-      }
-    } catch { /* fall through */ }
-  }
-
-  // 方法3: [...] を探す
-  const arrayMatch = content.match(/\[[\s\S]*\]/);
-  if (arrayMatch) {
-    try {
-      const parsed = JSON.parse(arrayMatch[0]);
-      if (Array.isArray(parsed)) {
-        console.log(`[Grok] 配列抽出パース成功: ${parsed.length}件`);
-        return mapItems(parsed);
-      }
-    } catch { /* fall through */ }
-  }
-
-  // 方法4: テキストからURL抽出
-  const urlPattern = /https?:\/\/[^\s)]+/g;
-  const urls = content.match(urlPattern);
-
-  if (urls && urls.length > 0) {
-    console.log(`[Grok] URL抽出: ${urls.length}件`);
-    const lines = content.split("\n").filter((l) => l.trim());
-    return urls.slice(0, 10).map((url) => {
-      const lineIdx = lines.findIndex((l) => l.includes(url));
-      const titleLine =
-        lineIdx > 0
-          ? lines[lineIdx - 1].replace(/^[\d.\-*]+\s*/, "").trim()
-          : "";
-      return {
-        title: titleLine || "X上のAI関連投稿",
-        url,
-        source: "X (Grok)",
-        content: "",
-        publishedAt: new Date().toISOString(),
-      };
-    });
-  }
-
-  // 方法5: テキスト全体を1件として返す
-  if (content.length > 50) {
-    console.log("[Grok] テキスト全体を1件として返却");
-    return [
-      {
-        title: "X上のAI最新動向まとめ（Grok分析）",
-        url: "https://x.com",
-        source: "X (Grok)",
-        content: content.substring(0, 1000),
-        publishedAt: new Date().toISOString(),
-      },
-    ];
-  }
-
-  return [];
-}
-
-/** 柔軟なフィールド名対応でRawArticle[]に変換 */
-function mapItems(items: GrokItem[]): RawArticle[] {
-  return items
-    .map((item) => {
-      const title =
-        str(item.title) || str(item.headline) || str(item.name) || "";
-      const url =
-        str(item.url) || str(item.link) || str(item.post_url) || "";
-      const summary =
-        str(item.summary) ||
-        str(item.description) ||
-        str(item.content) ||
-        str(item.text) ||
-        "";
-      return {
-        title: title || summary.substring(0, 100) || "X上のAI関連投稿",
-        url: url || "https://x.com",
-        source: "X (Grok)",
-        content: summary,
-        publishedAt: new Date().toISOString(),
-        metadata: { author: str(item.author) || str(item.user) },
-      };
-    })
-    .filter((a) => a.title !== "X上のAI関連投稿" || a.content.length > 0);
-}
-
-function str(v: unknown): string {
-  return typeof v === "string" ? v : "";
-}
-
-// ---------------------------------------------------------------------------
-// Collector
-// ---------------------------------------------------------------------------
-
 const grok: Collector = {
   name: "X (Grok)",
 
@@ -129,52 +9,130 @@ const grok: Collector = {
       console.log("[Grok] XAI_API_KEY が未設定のためスキップ");
       return [];
     }
-    console.log(`[Grok] APIキー先頭5文字: ${apiKey.substring(0, 5)}`);
 
     try {
-      console.log("[Grok] リクエスト送信");
+      console.log("[Grok] API呼び出し開始");
 
-      const res = await fetch(GROK_API_URL, {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+      const response = await fetch("https://api.x.ai/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: MODEL,
-          search_parameters: {
-            mode: "auto",
-            return_citations: true,
-          },
+          model: "grok-3-mini-fast",
           messages: [
             {
               role: "user",
-              content:
-                '直近24時間のAI・LLM関連の重要ニュースをX上の投稿から10件リストアップしてください。各項目について、投稿URL、内容の要約を含め、JSON配列で出力してください。形式: [{"title": "...", "url": "...", "summary": "..."}]',
+              content: `直近24時間にX（Twitter）上で話題になったAI・LLM関連の重要ニュースや投稿を10件リストアップしてください。
+
+各項目を以下のJSON形式の配列で返してください。JSON配列のみを返し、他のテキストは含めないでください。
+
+[
+  {
+    "title": "ニュースのタイトル（日本語）",
+    "url": "関連するURL（投稿URLまたは記事URL）",
+    "summary": "内容の要約（日本語、100文字程度）"
+  }
+]`,
             },
           ],
         }),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: controller.signal,
       });
 
-      console.log(`[Grok] レスポンスステータス: ${res.status}`);
-      if (!res.ok) return [];
+      clearTimeout(timeoutId);
 
-      const data = await res.json();
-      const content = data?.choices?.[0]?.message?.content || "";
-      console.log(`[Grok] content length: ${content.length}`);
-      console.log(`[Grok] content preview: ${content.substring(0, 200)}`);
+      console.log("[Grok] レスポンスステータス:", response.status);
 
-      if (!content || content.length === 0) {
-        console.log("[Grok] content が空");
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log("[Grok] エラー:", errorText.substring(0, 300));
         return [];
       }
 
-      const articles = parseGrokResponse(content).slice(0, 10);
-      console.log(`[Grok] 最終結果: ${articles.length}件`);
-      return articles;
+      const data = await response.json();
+      const content: string = data.choices?.[0]?.message?.content || "";
+
+      console.log("[Grok] コンテンツ長:", content.length);
+      console.log(
+        "[Grok] コンテンツ先頭200文字:",
+        content.substring(0, 200),
+      );
+
+      // JSON抽出を試みる（3段階）
+      let items: Record<string, unknown>[] = [];
+
+      // 方法1: そのままパース
+      try {
+        const parsed = JSON.parse(content);
+        if (Array.isArray(parsed)) items = parsed;
+      } catch {
+        /* fall through */
+      }
+
+      // 方法2: ```json ... ``` 内を抽出
+      if (items.length === 0) {
+        const match = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (match) {
+          try {
+            const parsed = JSON.parse(match[1].trim());
+            if (Array.isArray(parsed)) items = parsed;
+          } catch {
+            /* fall through */
+          }
+        }
+      }
+
+      // 方法3: 最初の [ から最後の ] までを抽出
+      if (items.length === 0) {
+        const start = content.indexOf("[");
+        const end = content.lastIndexOf("]");
+        if (start !== -1 && end !== -1 && end > start) {
+          try {
+            const parsed = JSON.parse(content.substring(start, end + 1));
+            if (Array.isArray(parsed)) items = parsed;
+          } catch {
+            /* fall through */
+          }
+        }
+      }
+
+      if (items.length > 0) {
+        console.log("[Grok] パース成功:", items.length, "件");
+        return items.slice(0, 10).map((item) => ({
+          title: String(item.title || "X上のAI関連投稿"),
+          url: String(item.url || "https://x.com"),
+          source: "X (Grok)",
+          content: String(item.summary || item.description || ""),
+          publishedAt: new Date().toISOString(),
+        }));
+      }
+
+      // フォールバック: テキスト全体を1件として返す
+      if (content.length > 50) {
+        console.log("[Grok] JSONパース失敗、テキストを1件として返す");
+        return [
+          {
+            title: "X上のAI最新動向まとめ（Grok分析）",
+            url: "https://x.com",
+            source: "X (Grok)",
+            content: content.substring(0, 1000),
+            publishedAt: new Date().toISOString(),
+          },
+        ];
+      }
+
+      console.log("[Grok] データなし");
+      return [];
     } catch (error) {
-      console.log("[Grok] 収集失敗:", error);
+      console.log(
+        "[Grok] エラー:",
+        error instanceof Error ? error.message : error,
+      );
       return [];
     }
   },

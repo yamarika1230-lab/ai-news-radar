@@ -19,8 +19,21 @@ const BATCH_SIZE = 20;
 // ---------------------------------------------------------------------------
 // システムプロンプト
 // ---------------------------------------------------------------------------
-const SYSTEM_PROMPT = `あなたは、大手コンサルティングファームのAIリサーチアナリストです。
-記事データを分析し、コンサルタントがクライアントへの提案に活用できるインテリジェンスを抽出してください。
+const SYSTEM_PROMPT = `★★★ 最重要ルール ★★★
+全ての記事のtitleは必ず日本語で出力してください。
+英語の記事タイトルをそのまま返すことは絶対に禁止です。
+必ず日本語に翻訳し、内容が端的にわかるタイトルにしてください。
+
+良い例:
+- "Instant 1.0, a backend for AI-coded apps" → "Instant 1.0 — AIコーディングアプリ向け新バックエンドが登場"
+- "Generative AI as a weapon of war in Iran" → "イラン紛争で生成AIが兵器として利用される実態が明らかに"
+- "27 questions to ask when choosing an LLM" → "LLM選定時に確認すべき27の重要チェックポイント"
+- "Google's TurboQuant reduces AI LLM cache memory..." → "Google、LLMキャッシュメモリを6分の1に削減する新技術TurboQuantを発表"
+- "Show HN: Open source alternative to Cursor" → "Cursorのオープンソース代替ツールが登場 — HackerNewsで話題に"
+
+固有名詞（Google, OpenAI, Claude, GPT等）は英語のままでOK。それ以外は全て日本語。
+
+あなたは大手コンサルティングファームのAIリサーチアナリストです。
 
 ■ カテゴリ分類
 - "enterprise": 企業のAI導入・活用事例、業界動向（最重要）
@@ -29,39 +42,21 @@ const SYSTEM_PROMPT = `あなたは、大手コンサルティングファーム
 - "tips": AI活用方法、プロンプト技術、業務効率化ノウハウ
 - "other": 上記に該当しないAI関連ニュース
 
-■ スコアリング基準（1-100の整数。必ず1以上）
+■ スコアリング基準（1-100の整数。必ず1以上。50は使わないこと）
 - クライアント提案への活用度（40%）
 - 具体性・実用性（25%）
 - 速報性・新規性（20%）
 - 業界への影響度（15%）
 PR TIMES / 日経クロステック / Google News の企業AI事例は enterprise で70以上。
-arXiv論文で実務応用不明確なものは50以下。
+arXiv論文で実務応用不明確なものは40以下。
 
-★★★ 最重要ルール: titleは必ず日本語で出力すること ★★★
-英語の記事タイトルをそのまま返すことは絶対に禁止。必ず日本語に翻訳すること。
-固有名詞（Claude, GPT, Google, OpenAI等の企業名・製品名）は英語のままでOK。
-それ以外は全て日本語にすること。
-
-具体例:
-- NG: "CyberAgent moves faster with ChatGPT Enterprise and Codex"
-  OK: "サイバーエージェント、ChatGPT EnterpriseとCodexで業務効率化を加速"
-- NG: "The next phase of enterprise AI"
-  OK: "OpenAI、エンタープライズAIの次なるフェーズを提示 — 企業向けAI戦略の新方針"
-- NG: "Thinking In The Agent Age"
-  OK: "エージェント時代の到来 — AI自律型エージェントが変える働き方"
-- NG: "Show HN: Open source alternative to Cursor"
-  OK: "Cursorのオープンソース代替ツールが登場 — HackerNewsで話題に"
-
-■ 出力形式
-各記事について以下のJSONで返してください:
+■ 出力形式（JSON配列のみ）
 - index: 記事の番号（整数）
-- title: 日本語タイトル
+- title: 日本語タイトル（英語禁止）
 - summary: 日本語要約（150-250文字）
 - category: カテゴリ
-- score: 総合スコア（1-100）
-- originalLanguage: "en" / "ja" / "other"
-
-出力は純粋なJSON配列のみ。`;
+- score: 総合スコア（1-100、50は不可）
+- originalLanguage: "en" / "ja" / "other"`;
 
 // ---------------------------------------------------------------------------
 // ヘルパー
@@ -254,11 +249,10 @@ JSON配列のみを返してください。形式:
 
     console.log(`[Summarizer] parsed ${results.length} articles`);
 
-    // デバッグ: 最初の結果のindex型を確認
+    // デバッグ: 最初の1件をフル出力
     if (results.length > 0) {
-      const first = results[0];
       console.log(
-        `[Summarizer] first result: index=${first.index}(${typeof first.index}), title="${(first.title ?? "").substring(0, 40)}", score=${first.score}(${typeof first.score}), category=${first.category}`,
+        `[Summarizer] サンプル記事: ${JSON.stringify(results[0])}`,
       );
     }
 
