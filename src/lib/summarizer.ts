@@ -14,7 +14,7 @@ const client = new Anthropic({
 });
 
 const MODEL = "claude-sonnet-4-5";
-const BATCH_SIZE = 20;
+const BATCH_SIZE = 8;
 
 // ---------------------------------------------------------------------------
 // システムプロンプト
@@ -149,11 +149,32 @@ function guessScore(article: RawArticle): number {
   return Math.min(100, Math.max(1, score));
 }
 
+/** タイトルが英語のみの場合に簡易的な日本語表示を生成 */
+function translateTitleSimple(title: string): string {
+  // 既に日本語を含む場合はそのまま
+  if (/[\u3000-\u9fff\u30A0-\u30FF\u3040-\u309F]/.test(title)) return title;
+
+  // GitHub リポジトリ名（user/repo形式）
+  if (/^[\w.-]+\/[\w.-]+$/.test(title)) {
+    const repoName = title.split("/").pop() || title;
+    const readable = repoName.replace(/[-_]/g, " ");
+    return `GitHub: ${readable}（AIツール）`;
+  }
+
+  // "Show HN:" プレフィックス
+  if (title.startsWith("Show HN:")) {
+    return title.replace("Show HN:", "HN注目:") + "（※英語記事）";
+  }
+
+  // その他の英語タイトル
+  return `${title}（※英語記事）`;
+}
+
 /** API失敗時のフォールバック */
 function toFallback(article: RawArticle): ProcessedArticle {
   return {
     id: generateId(article.url),
-    title: article.title,
+    title: translateTitleSimple(article.title),
     url: article.url,
     source: article.source,
     summary: "",
@@ -325,18 +346,36 @@ export async function summarizeAndClassify(
       `[Summarizer] バッチ ${b + 1}/${batches.length} (${batches[b].length}件)`,
     );
     const processed = await processBatch(batches[b], offset);
+
+    // バッチごとの成功/フォールバック統計
+    const successCount = processed.filter((a) => a.summary.length > 0).length;
+    const fallbackCount = processed.length - successCount;
+    console.log(
+      `[Summarizer] バッチ ${b + 1}: 入力 ${batches[b].length}件, Claude成功: ${successCount}件, フォールバック: ${fallbackCount}件`,
+    );
+
     results.push(...processed);
+  }
+
+  // 最終チェック: 英語のみのタイトルに接尾辞を付ける
+  for (const article of results) {
+    if (!/[\u3000-\u9fff\u30A0-\u30FF\u3040-\u309F]/.test(article.title)) {
+      article.title = translateTitleSimple(article.title);
+    }
   }
 
   // 統計ログ
   const catCounts: Record<string, number> = {};
   let scoreSum = 0;
+  const englishTitleCount = results.filter(
+    (a) => !/[\u3000-\u9fff\u30A0-\u30FF\u3040-\u309F]/.test(a.title.replace(/（※英語記事）$/, "")),
+  ).length;
   for (const a of results) {
     catCounts[a.category] = (catCounts[a.category] ?? 0) + 1;
     scoreSum += a.score;
   }
   console.log(
-    `[Summarizer] 完了: ${results.length}件, 平均スコア=${(scoreSum / results.length).toFixed(0)}, カテゴリ=${JSON.stringify(catCounts)}`,
+    `[Summarizer] 完了: ${results.length}件, 平均スコア=${(scoreSum / results.length).toFixed(0)}, カテゴリ=${JSON.stringify(catCounts)}, 英語タイトル残: ${englishTitleCount}件`,
   );
 
   return results;

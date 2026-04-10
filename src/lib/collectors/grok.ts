@@ -27,17 +27,10 @@ const grok: Collector = {
           messages: [
             {
               role: "user",
-              content: `直近24時間にX（Twitter）上で話題になったAI・LLM関連の重要ニュースや投稿を10件リストアップしてください。
-
-各項目を以下のJSON形式の配列で返してください。JSON配列のみを返し、他のテキストは含めないでください。
-
-[
-  {
-    "title": "ニュースのタイトル（日本語）",
-    "url": "関連するURL（投稿URLまたは記事URL）",
-    "summary": "内容の要約（日本語、100文字程度）"
-  }
-]`,
+              content: `直近24時間にX上で話題になったAI関連の重要ニュースを10件教えてください。
+各項目について、タイトル（日本語）と内容の要約（日本語、100文字程度）をJSON配列で返してください。
+URLは不要です。正確なURLが分からない場合は含めないでください。
+形式: [{"title": "...", "summary": "..."}]`,
             },
           ],
         }),
@@ -58,36 +51,26 @@ const grok: Collector = {
       const content: string = data.choices?.[0]?.message?.content || "";
 
       console.log("[Grok] コンテンツ長:", content.length);
-      console.log(
-        "[Grok] コンテンツ先頭200文字:",
-        content.substring(0, 200),
-      );
+      console.log("[Grok] コンテンツ先頭200文字:", content.substring(0, 200));
 
-      // JSON抽出を試みる（3段階）
+      // JSON抽出（3段階）
       let items: Record<string, unknown>[] = [];
 
-      // 方法1: そのままパース
       try {
         const parsed = JSON.parse(content);
         if (Array.isArray(parsed)) items = parsed;
-      } catch {
-        /* fall through */
-      }
+      } catch { /* fall through */ }
 
-      // 方法2: ```json ... ``` 内を抽出
       if (items.length === 0) {
         const match = content.match(/```(?:json)?\s*([\s\S]*?)```/);
         if (match) {
           try {
             const parsed = JSON.parse(match[1].trim());
             if (Array.isArray(parsed)) items = parsed;
-          } catch {
-            /* fall through */
-          }
+          } catch { /* fall through */ }
         }
       }
 
-      // 方法3: 最初の [ から最後の ] までを抽出
       if (items.length === 0) {
         const start = content.indexOf("[");
         const end = content.lastIndexOf("]");
@@ -95,30 +78,32 @@ const grok: Collector = {
           try {
             const parsed = JSON.parse(content.substring(start, end + 1));
             if (Array.isArray(parsed)) items = parsed;
-          } catch {
-            /* fall through */
-          }
+          } catch { /* fall through */ }
         }
       }
 
       if (items.length > 0) {
         console.log("[Grok] パース成功:", items.length, "件");
-        return items.slice(0, 10).map((item) => ({
-          title: String(item.title || "X上のAI関連投稿"),
-          url: String(item.url || "https://x.com"),
-          source: "X (Grok)",
-          content: String(item.summary || item.description || ""),
-          publishedAt: new Date().toISOString(),
-        }));
+        return items.slice(0, 10).map((item) => {
+          const title = String(item.title || "X上のAI関連投稿");
+          return {
+            title,
+            url: `https://x.com/search?q=${encodeURIComponent(title)}&f=top`,
+            source: "X (Grok)",
+            content: String(item.summary || item.description || ""),
+            publishedAt: new Date().toISOString(),
+          };
+        });
       }
 
-      // フォールバック: テキスト全体を1件として返す
+      // フォールバック: テキスト全体を1件
       if (content.length > 50) {
         console.log("[Grok] JSONパース失敗、テキストを1件として返す");
+        const title = "X上のAI最新動向まとめ（Grok分析）";
         return [
           {
-            title: "X上のAI最新動向まとめ（Grok分析）",
-            url: "https://x.com",
+            title,
+            url: `https://x.com/search?q=${encodeURIComponent("AI LLM ニュース")}&f=top`,
             source: "X (Grok)",
             content: content.substring(0, 1000),
             publishedAt: new Date().toISOString(),
