@@ -33,9 +33,8 @@ const xApi: Collector = {
     try {
       console.log("[X API] ツイート検索開始");
 
-      const query =
-        "(AI OR LLM OR ChatGPT OR Claude OR Gemini OR OpenAI OR Anthropic) -is:retweet -is:reply min_faves:10";
-      const url = `https://api.x.com/2/tweets/search/recent?query=${encodeURIComponent(query)}&max_results=10&tweet.fields=created_at,public_metrics,author_id,entities&expansions=author_id&user.fields=username,name`;
+      const query = "AI lang:ja -is:retweet";
+      const url = `https://api.x.com/2/tweets/search/recent?query=${encodeURIComponent(query)}&max_results=10&tweet.fields=created_at,public_metrics,author_id&expansions=author_id&user.fields=username,name`;
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -51,17 +50,28 @@ const xApi: Collector = {
 
       console.log("[X API] レスポンスステータス:", response.status);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.log("[X API] エラー:", errorText.substring(0, 300));
+      const responseText = await response.text();
+      console.log("[X API] レスポンス全文:", responseText.substring(0, 800));
+
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        console.log("[X API] JSONパース失敗");
         return [];
       }
 
-      const data = await response.json();
-      console.log("[X API] レスポンスボディ:", JSON.stringify(data).substring(0, 500));
+      if (data.errors) {
+        console.log("[X API] APIエラー:", JSON.stringify(data.errors).substring(0, 300));
+        return [];
+      }
 
-      const tweets: Tweet[] = data.data || [];
-      const users: XUser[] = data.includes?.users || [];
+      if (!response.ok) {
+        return [];
+      }
+
+      const tweets: Tweet[] = (data.data as Tweet[]) || [];
+      const users: XUser[] = ((data.includes as Record<string, unknown>)?.users as XUser[]) || [];
 
       console.log("[X API] 取得ツイート数:", tweets.length);
 
