@@ -34,7 +34,7 @@ const xApi: Collector = {
       console.log("[X API] ツイート検索開始");
 
       const query =
-        "(AI OR LLM OR ChatGPT OR Claude OR GPT OR Gemini OR OpenAI OR Anthropic) -is:retweet -is:reply lang:ja min_faves:50";
+        "(AI OR LLM OR ChatGPT OR Claude OR Gemini OR OpenAI OR Anthropic) -is:retweet -is:reply min_faves:10";
       const url = `https://api.x.com/2/tweets/search/recent?query=${encodeURIComponent(query)}&max_results=10&tweet.fields=created_at,public_metrics,author_id,entities&expansions=author_id&user.fields=username,name`;
 
       const controller = new AbortController();
@@ -58,6 +58,8 @@ const xApi: Collector = {
       }
 
       const data = await response.json();
+      console.log("[X API] レスポンスボディ:", JSON.stringify(data).substring(0, 500));
+
       const tweets: Tweet[] = data.data || [];
       const users: XUser[] = data.includes?.users || [];
 
