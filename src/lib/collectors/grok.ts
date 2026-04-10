@@ -28,8 +28,18 @@ function buildRequestBody(query: string) {
     model: MODEL,
     messages: [
       {
+        role: "system",
+        content:
+          "あなたはX/Twitterの投稿を検索して分析するアシスタントです。x_searchツールを使って検索を行い、結果をJSON配列で返してください。",
+      },
+      {
         role: "user",
-        content: `以下のトピックに関する直近24時間のX投稿を検索し、重要なものを10件リストアップしてください。各投稿について、投稿のURL、投稿者名、内容の要約を含めてください。JSON形式で出力してください。トピック: ${query}`,
+        content: `以下のトピックに関する直近24時間のX投稿を検索し、重要なものを10件リストアップしてください。各投稿について、投稿のURL、投稿者名、内容の要約を含めてください。
+
+出力形式（純粋なJSON配列のみ、コードブロック不要）:
+[{"title":"投稿の概要","url":"https://x.com/...","author":"@username","summary":"内容の要約"}]
+
+トピック: ${query}`,
       },
     ],
     tools: [
@@ -48,6 +58,7 @@ function buildRequestBody(query: string) {
         },
       },
     ],
+    tool_choice: "auto",
   };
 }
 
@@ -55,6 +66,11 @@ async function searchWithGrok(
   query: string,
   apiKey: string,
 ): Promise<RawArticle[]> {
+  const requestBody = buildRequestBody(query);
+  console.log(
+    `[Grok] APIリクエスト送信: model=${requestBody.model}, query="${query}", tools=${requestBody.tools.length}個`,
+  );
+
   const res = await fetchWithTimeout(
     GROK_API_URL,
     {
@@ -63,21 +79,60 @@ async function searchWithGrok(
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(buildRequestBody(query)),
+      body: JSON.stringify(requestBody),
     },
     TIMEOUT_MS,
   );
 
+  console.log(`[Grok] レスポンスステータス: ${res.status}`);
+
+  // 生のレスポンスボディを取得（.json() ではなく .text() で中身を確認）
+  const rawBody = await res.text();
+  console.log(
+    `[Grok] レスポンスボディ(先頭500文字): ${rawBody.substring(0, 500)}`,
+  );
+
   if (!res.ok) {
-    console.log(`[Grok] HTTP ${res.status} for query: ${query}`);
     return [];
   }
 
-  const data = await res.json();
+  // テキストからJSONをパース
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(rawBody);
+  } catch {
+    console.log("[Grok] レスポンスボディのJSONパース失敗");
+    return [];
+  }
 
-  // レスポンスからテキスト部分を抽出
-  const textContent = data?.choices?.[0]?.message?.content;
-  if (!textContent || typeof textContent !== "string") return [];
+  // choices 構造を確認
+  const choices = data?.choices as
+    | { message?: { content?: string | null; tool_calls?: unknown[] }; finish_reason?: string }[]
+    | undefined;
+
+  if (!choices || choices.length === 0) {
+    console.log("[Grok] choices が空またはなし");
+    return [];
+  }
+
+  const message = choices[0]?.message;
+  const finishReason = choices[0]?.finish_reason;
+  console.log(
+    `[Grok] finish_reason=${finishReason}, content type=${typeof message?.content}, content length=${typeof message?.content === "string" ? message.content.length : "N/A"}, tool_calls=${message?.tool_calls ? "あり" : "なし"}`,
+  );
+
+  // content を取得
+  const textContent =
+    typeof message?.content === "string" && message.content.trim()
+      ? message.content
+      : null;
+
+  if (!textContent) {
+    console.log(
+      `[Grok] テキストcontent が空 — message keys: ${Object.keys(message ?? {}).join(", ")}`,
+    );
+    return [];
+  }
 
   // JSON 配列を抽出してパース
   try {
@@ -87,9 +142,12 @@ async function searchWithGrok(
       textContent;
 
     const posts: GrokPost[] = JSON.parse(jsonStr);
-    if (!Array.isArray(posts)) return [];
+    if (!Array.isArray(posts)) {
+      console.log(`[Grok] パース結果が配列ではない: ${typeof posts}`);
+      return [];
+    }
 
-    return posts
+    const articles = posts
       .filter((p) => p.url || p.summary || p.content)
       .map((p) => ({
         title: p.title ?? p.summary?.slice(0, 100) ?? "",
@@ -102,8 +160,12 @@ async function searchWithGrok(
           searchQuery: query,
         },
       }));
-  } catch {
-    console.log(`[Grok] JSONパース失敗 for query: ${query}`);
+
+    console.log(`[Grok] パース結果: ${articles.length}件`);
+    return articles;
+  } catch (error) {
+    console.log(`[Grok] JSONパース失敗: ${error}`);
+    console.log(`[Grok] パース対象テキスト: ${textContent.slice(0, 500)}`);
     return [];
   }
 }
@@ -116,6 +178,9 @@ const grok: Collector = {
   name: "X (Grok)",
 
   async collect(): Promise<RawArticle[]> {
+    console.log(
+      `[Grok] XAI_API_KEY設定: ${!!process.env.XAI_API_KEY}`,
+    );
     const apiKey = process.env.XAI_API_KEY;
     if (!apiKey) {
       console.log("[Grok] XAI_API_KEY が未設定 — スキップ");
@@ -124,7 +189,6 @@ const grok: Collector = {
 
     const articles: RawArticle[] = [];
 
-    // 3つの検索クエリを順番に実行
     for (const query of SEARCH_QUERIES) {
       try {
         const results = await searchWithGrok(query, apiKey);
@@ -134,9 +198,10 @@ const grok: Collector = {
       }
     }
 
-    // URL が空の記事を除外
     const valid = articles.filter((a) => a.url);
-    console.log(`[Grok] ${valid.length}件取得`);
+    console.log(
+      `[Grok] 完了: 全${articles.length}件中、URL有効 ${valid.length}件`,
+    );
     return valid;
   },
 };

@@ -6,7 +6,7 @@ const RSS_FEEDS = [
   { name: "OpenAI", url: "https://openai.com/blog/rss.xml" },
   { name: "Google AI", url: "https://blog.google/technology/ai/rss/" },
   { name: "Meta AI", url: "https://ai.meta.com/blog/rss/" },
-  { name: "Mistral", url: "https://mistral.ai/feed/" },
+  { name: "Mistral", url: "https://mistral.ai/news/rss.xml" },
 ];
 
 // 48時間のカットオフ
