@@ -99,4 +99,5 @@ const xApi: Collector = {
   },
 };
 
+export const collectXApi = xApi.collect.bind(xApi);
 export default xApi;

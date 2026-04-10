@@ -1,17 +1,22 @@
-import xApi from "@/lib/collectors/x-api";
+import { collectXApi } from "@/lib/collectors/x-api";
 
 export async function GET() {
+  const token = process.env.X_BEARER_TOKEN;
+  console.log("[X API Test] Bearer Token exists:", !!token);
+
   try {
-    const articles = await xApi.collect();
+    const articles = await collectXApi();
+    console.log("[X API Test] 結果:", articles.length, "件");
     return Response.json({
       success: true,
       collector: "X API",
+      tokenExists: !!token,
       count: articles.length,
       articles: articles.slice(0, 3),
     });
   } catch (error) {
-    return Response.json({
-      error: error instanceof Error ? error.message : String(error),
-    });
+    const msg = error instanceof Error ? error.message : String(error);
+    console.log("[X API Test] エラー:", msg);
+    return Response.json({ error: msg, tokenExists: !!token });
   }
 }
