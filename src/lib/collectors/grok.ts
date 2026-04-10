@@ -94,8 +94,8 @@ const grok: Collector = {
         return [];
       }
 
-      // JSON 配列を抽出してパース
-      const articles = parseGrokResponse(textContent);
+      // JSON 配列を抽出してパース（最大10件）
+      const articles = parseGrokResponse(textContent).slice(0, 10);
       const valid = articles.filter((a) => a.url);
       console.log(`[Grok] 完了: ${valid.length}件`);
       return valid;
@@ -178,7 +178,22 @@ function fallbackParse(text: string): RawArticle[] {
     });
   }
 
-  console.log(`[Grok] フォールバック結果: ${articles.length}件`);
+  console.log(`[Grok] URL抽出フォールバック: ${articles.length}件`);
+
+  // URLが1件も見つからなければテキスト全体を1記事として返す
+  if (articles.length === 0) {
+    console.log("[Grok] テキスト全体を1記事として返却");
+    return [
+      {
+        title: text.split("\n").find((l) => l.trim())?.slice(0, 100) ?? "X (Grok) まとめ",
+        url: "",
+        source: "X (Grok)",
+        content: text.slice(0, 500),
+        publishedAt: new Date().toISOString(),
+      },
+    ];
+  }
+
   return articles;
 }
 

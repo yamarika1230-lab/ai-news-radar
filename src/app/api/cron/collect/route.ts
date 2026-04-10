@@ -5,7 +5,7 @@ import producthunt from "@/lib/collectors/producthunt";
 import githubTrending from "@/lib/collectors/github-trending";
 import arxiv from "@/lib/collectors/arxiv";
 import rssBlogs from "@/lib/collectors/rss-blogs";
-// import grok from "@/lib/collectors/grok"; // Phase 2: Grok APIハング問題のため無効化
+import grok from "@/lib/collectors/grok";
 import serpapi from "@/lib/collectors/serpapi";
 import { fetchGoogleTrends } from "@/lib/collectors/serpapi";
 import { summarizeAndClassify, extractTrendingKeywords } from "@/lib/summarizer";
@@ -24,7 +24,7 @@ const collectors: Collector[] = [
   githubTrending,
   arxiv,
   rssBlogs,
-  // grok,   // Phase 2: Grok APIハング問題のため無効化
+  grok,
   serpapi,
 ];
 
@@ -226,6 +226,7 @@ export async function GET(request: Request) {
       arXiv: 5,
       "RSS/Blogs": 10,
       "Google News": 10,
+      "X (Grok)": 10,
     };
 
     const balanced = balanceBySource(unique, SOURCE_LIMITS);
