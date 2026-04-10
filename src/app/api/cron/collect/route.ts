@@ -34,9 +34,7 @@ const collectors: Collector[] = [
 
 function isAuthorized(request: Request): boolean {
   const secret = process.env.CRON_SECRET;
-  // CRON_SECRET が未設定ならスキップ（開発用）
   if (!secret) return true;
-
   const authHeader = request.headers.get("authorization");
   return authHeader === `Bearer ${secret}`;
 }
@@ -48,7 +46,6 @@ function isAuthorized(request: Request): boolean {
 function deduplicateByUrl(articles: RawArticle[]): RawArticle[] {
   const seen = new Set<string>();
   return articles.filter((a) => {
-    // URL を正規化（末尾スラッシュ・クエリパラメータの揺れを吸収）
     const normalized = a.url.split("?")[0].replace(/\/+$/, "").toLowerCase();
     if (seen.has(normalized)) return false;
     seen.add(normalized);
@@ -73,11 +70,76 @@ async function withRetry<T>(
 }
 
 // ---------------------------------------------------------------------------
+// 全コレクター並列実行（50秒グローバルタイムアウト付き）
+// ---------------------------------------------------------------------------
+
+const GLOBAL_TIMEOUT_MS = 50_000;
+
+interface CollectorResult {
+  name: string;
+  articles: RawArticle[];
+}
+
+async function runCollectorsWithTimeout(
+  collectorList: Collector[],
+): Promise<CollectorResult[]> {
+  // 各コレクターの Promise を個別に管理（完了済みの結果を保持するため）
+  const completed: CollectorResult[] = [];
+
+  const collectorPromises = collectorList.map(async (collector) => {
+    try {
+      const articles = await collector.collect();
+      const result: CollectorResult = { name: collector.name, articles };
+      completed.push(result);
+      await updateSourceStatus({
+        name: collector.name,
+        status: articles.length > 0 ? "ok" : "warn",
+        count: articles.length,
+        lastRun: new Date().toISOString(),
+      });
+      return result;
+    } catch (error) {
+      console.log(`[cron] ${collector.name} 収集失敗:`, error);
+      const result: CollectorResult = {
+        name: collector.name,
+        articles: [],
+      };
+      completed.push(result);
+      await updateSourceStatus({
+        name: collector.name,
+        status: "error",
+        count: 0,
+        lastRun: new Date().toISOString(),
+      });
+      return result;
+    }
+  });
+
+  // グローバルタイムアウト
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(
+      () => reject(new Error("Global collector timeout (50s)")),
+      GLOBAL_TIMEOUT_MS,
+    ),
+  );
+
+  try {
+    // 全コレクターが時間内に終われば allSettled の結果を使う
+    await Promise.race([Promise.allSettled(collectorPromises), timeout]);
+  } catch (error) {
+    console.log(
+      `[cron] グローバルタイムアウト — ${completed.length}/${collectorList.length} 完了済みで続行`,
+    );
+  }
+
+  return completed;
+}
+
+// ---------------------------------------------------------------------------
 // メインハンドラー
 // ---------------------------------------------------------------------------
 
 export async function GET(request: Request) {
-  // 1. 認証チェック
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -86,54 +148,27 @@ export async function GET(request: Request) {
 
   try {
     // -----------------------------------------------------------------------
-    // 2. 全コレクターを並列実行（Promise.allSettled）
-    //    + SerpApi Google Trends も並列で取得
+    // 2. 全コレクターを並列実行 + Google Trends
     // -----------------------------------------------------------------------
-    const [settled, serpTrends] = await Promise.all([
-      Promise.allSettled(
-        collectors.map(async (collector) => {
-          try {
-            const articles = await collector.collect();
-            await updateSourceStatus({
-              name: collector.name,
-              status: articles.length > 0 ? "ok" : "warn",
-              count: articles.length,
-              lastRun: new Date().toISOString(),
-            });
-            return { name: collector.name, articles };
-          } catch (error) {
-            console.log(`[cron] ${collector.name} 収集失敗:`, error);
-            await updateSourceStatus({
-              name: collector.name,
-              status: "error",
-              count: 0,
-              lastRun: new Date().toISOString(),
-            });
-            // エラーを握りつぶし、空結果として扱う
-            return { name: collector.name, articles: [] as RawArticle[] };
-          }
-        }),
-      ),
-      // SerpApi Google Trends（失敗しても空配列）
+    const [collectorResults, serpTrends] = await Promise.all([
+      runCollectorsWithTimeout(collectors),
       fetchGoogleTrends().catch((err) => {
         console.log("[cron] Google Trends 取得失敗:", err);
         return [] as TrendingKeyword[];
       }),
     ]);
 
-    // 成功したソースの結果を結合
+    // 結果を結合
     const allRaw: RawArticle[] = [];
-    const sourceResults: Record<string, { status: string; count: number }> = {};
+    const sourceResults: Record<string, { status: string; count: number }> =
+      {};
 
-    for (const result of settled) {
-      if (result.status === "fulfilled") {
-        const { name, articles } = result.value;
-        allRaw.push(...articles);
-        sourceResults[name] = {
-          status: articles.length > 0 ? "ok" : "warn",
-          count: articles.length,
-        };
-      }
+    for (const { name, articles } of collectorResults) {
+      allRaw.push(...articles);
+      sourceResults[name] = {
+        status: articles.length > 0 ? "ok" : "warn",
+        count: articles.length,
+      };
     }
 
     console.log(`[cron] 全ソース合計: ${allRaw.length}件（重複除去前）`);
@@ -160,13 +195,11 @@ export async function GET(request: Request) {
 
     if (serpTrends.length > 0) {
       console.log(
-        `[cron] トレンドキーワード: SerpApi Google Trends を使用 (${serpTrends.length}件)`,
+        `[cron] トレンドキーワード: Google Trends (${serpTrends.length}件)`,
       );
       trendingKeywords = serpTrends;
     } else {
-      console.log(
-        "[cron] トレンドキーワード: SerpApi 結果なし — Claude API で推定",
-      );
+      console.log("[cron] トレンドキーワード: Claude API で推定");
       trendingKeywords = await withRetry(
         () => extractTrendingKeywords(articles),
         "extractTrendingKeywords",
@@ -219,7 +252,6 @@ export async function GET(request: Request) {
       elapsedSeconds: Number(elapsed),
     });
   } catch (error) {
-    // 全体が失敗した場合
     console.error("[cron] 致命的エラー:", error);
     return NextResponse.json(
       {

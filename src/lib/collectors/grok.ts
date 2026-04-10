@@ -3,13 +3,7 @@ import { fetchWithTimeout } from "./utils";
 
 const GROK_API_URL = "https://api.x.ai/v1/chat/completions";
 const MODEL = "grok-3-mini-fast";
-const TIMEOUT_MS = 30_000;
-
-const SEARCH_QUERIES = [
-  "AI LLM 新モデル リリース 直近24時間",
-  "Claude Code OpenAI Gemini 新機能 アップデート",
-  "AI活用 企業導入 事例 直近24時間",
-];
+const TIMEOUT_MS = 15_000;
 
 // ---------------------------------------------------------------------------
 // Grok API リクエスト
@@ -66,10 +60,7 @@ async function searchWithGrok(
   query: string,
   apiKey: string,
 ): Promise<RawArticle[]> {
-  const requestBody = buildRequestBody(query);
-  console.log(
-    `[Grok] APIリクエスト送信: model=${requestBody.model}, query="${query}", tools=${requestBody.tools.length}個`,
-  );
+  console.log(`[Grok] リクエスト送信: "${query}"`);
 
   const res = await fetchWithTimeout(
     GROK_API_URL,
@@ -79,31 +70,19 @@ async function searchWithGrok(
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify(buildRequestBody(query)),
     },
     TIMEOUT_MS,
   );
 
   console.log(`[Grok] レスポンスステータス: ${res.status}`);
 
-  // 生のレスポンスボディを取得（.json() ではなく .text() で中身を確認）
-  const rawBody = await res.text();
-  console.log(
-    `[Grok] レスポンスボディ(先頭500文字): ${rawBody.substring(0, 500)}`,
-  );
-
   if (!res.ok) {
+    console.log(`[Grok] HTTP ${res.status} — スキップ`);
     return [];
   }
 
-  // テキストからJSONをパース
-  let data: Record<string, unknown>;
-  try {
-    data = JSON.parse(rawBody);
-  } catch {
-    console.log("[Grok] レスポンスボディのJSONパース失敗");
-    return [];
-  }
+  const data = await res.json();
 
   // choices 構造を確認
   const choices = data?.choices as
@@ -111,26 +90,23 @@ async function searchWithGrok(
     | undefined;
 
   if (!choices || choices.length === 0) {
-    console.log("[Grok] choices が空またはなし");
+    console.log("[Grok] choices が空");
     return [];
   }
 
   const message = choices[0]?.message;
   const finishReason = choices[0]?.finish_reason;
   console.log(
-    `[Grok] finish_reason=${finishReason}, content type=${typeof message?.content}, content length=${typeof message?.content === "string" ? message.content.length : "N/A"}, tool_calls=${message?.tool_calls ? "あり" : "なし"}`,
+    `[Grok] finish_reason=${finishReason}, content length=${typeof message?.content === "string" ? message.content.length : "N/A"}`,
   );
 
-  // content を取得
   const textContent =
     typeof message?.content === "string" && message.content.trim()
       ? message.content
       : null;
 
   if (!textContent) {
-    console.log(
-      `[Grok] テキストcontent が空 — message keys: ${Object.keys(message ?? {}).join(", ")}`,
-    );
+    console.log("[Grok] テキスト content が空");
     return [];
   }
 
@@ -165,7 +141,6 @@ async function searchWithGrok(
     return articles;
   } catch (error) {
     console.log(`[Grok] JSONパース失敗: ${error}`);
-    console.log(`[Grok] パース対象テキスト: ${textContent.slice(0, 500)}`);
     return [];
   }
 }
@@ -178,31 +153,21 @@ const grok: Collector = {
   name: "X (Grok)",
 
   async collect(): Promise<RawArticle[]> {
-    console.log(
-      `[Grok] XAI_API_KEY設定: ${!!process.env.XAI_API_KEY}`,
-    );
     const apiKey = process.env.XAI_API_KEY;
     if (!apiKey) {
       console.log("[Grok] XAI_API_KEY が未設定 — スキップ");
       return [];
     }
 
-    const articles: RawArticle[] = [];
-
-    for (const query of SEARCH_QUERIES) {
-      try {
-        const results = await searchWithGrok(query, apiKey);
-        articles.push(...results);
-      } catch (error) {
-        console.log(`[Grok] クエリ失敗 "${query}":`, error);
-      }
+    try {
+      const articles = await searchWithGrok("AI LLM 最新ニュース", apiKey);
+      const valid = articles.filter((a) => a.url);
+      console.log(`[Grok] 完了: ${valid.length}件`);
+      return valid;
+    } catch (error) {
+      console.log("[Grok] 収集失敗:", error);
+      return [];
     }
-
-    const valid = articles.filter((a) => a.url);
-    console.log(
-      `[Grok] 完了: 全${articles.length}件中、URL有効 ${valid.length}件`,
-    );
-    return valid;
   },
 };
 
