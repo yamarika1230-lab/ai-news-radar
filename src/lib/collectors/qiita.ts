@@ -10,7 +10,7 @@ const qiita: Collector = {
 
       const tags = ["AI", "LLM", "ChatGPT", "Claude", "OpenAI", "機械学習", "生成AI", "AIエージェント"];
       const query = tags.join("+OR+");
-      const url = `https://qiita.com/api/v2/items?query=${query}&per_page=10&page=1`;
+      const url = `https://qiita.com/api/v2/items?query=${query}&per_page=20&page=1`;
 
       const response = await fetch(url, {
         headers: { Accept: "application/json" },

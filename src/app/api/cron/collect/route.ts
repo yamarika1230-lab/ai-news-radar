@@ -9,7 +9,7 @@ import rssBlogs from "@/lib/collectors/rss-blogs";
 import xApi from "@/lib/collectors/x-api";
 import serpapi from "@/lib/collectors/serpapi";
 import qiita from "@/lib/collectors/qiita";
-import noteCollector from "@/lib/collectors/note";
+// import noteCollector from "@/lib/collectors/note"; // VercelのIPがnoteにブロック
 import { fetchGoogleTrends, fetchRelatedKeywords } from "@/lib/collectors/serpapi";
 import { summarizeAndClassify, extractTrendingKeywords } from "@/lib/summarizer";
 import { saveDailyDigest, updateSourceStatus } from "@/lib/storage";
@@ -30,7 +30,7 @@ const collectors: Collector[] = [
   xApi,
   serpapi,
   qiita,
-  noteCollector,
+  // noteCollector, // 無効化（VercelのIPがnoteにブロックされるため）
 ];
 
 // ---------------------------------------------------------------------------

@@ -69,6 +69,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    console.log(`[API /news] 返却記事数: ${digest.articles.length}`);
     return jsonResponse(digest);
   } catch (error) {
     console.error("[api/news] エラー:", error);

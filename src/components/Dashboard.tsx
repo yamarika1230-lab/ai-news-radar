@@ -64,7 +64,6 @@ export default function Dashboard() {
     X: ["X"],
     "Google News": ["Google News"],
     Qiita: ["Qiita"],
-    note: ["note"],
   };
 
   // カテゴリ + ソース フィルタ（AND条件）

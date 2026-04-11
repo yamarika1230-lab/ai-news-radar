@@ -108,33 +108,64 @@ function chunk<T>(arr: T[], size: number): T[][] {
 
 /** JSON配列を堅牢にパース */
 function parseClaudeResponse(text: string): unknown[] {
-  // 1. 直接パース
+  // ステップ1: ```json ... ``` のコードブロックを除去
+  let cleaned = text;
+
+  const codeBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+  if (codeBlockMatch) {
+    cleaned = codeBlockMatch[1].trim();
+    console.log("[Summarizer] コードブロック除去済み");
+  }
+
+  // ステップ2: 先頭・末尾の余分な文字を除去し [ ] を探す
+  cleaned = cleaned.trim();
+  const bracketStart = cleaned.indexOf("[");
+  const bracketEnd = cleaned.lastIndexOf("]");
+  if (bracketStart !== -1 && bracketEnd !== -1 && bracketEnd > bracketStart) {
+    cleaned = cleaned.substring(bracketStart, bracketEnd + 1);
+  }
+
+  // ステップ3: パース試行
   try {
-    const direct = JSON.parse(text);
-    if (Array.isArray(direct)) return direct;
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) {
+      console.log("[Summarizer] パース成功:", parsed.length, "件");
+      return parsed;
+    }
+  } catch (e) {
+    console.log("[Summarizer] パースエラー:", (e as Error).message);
+    console.log("[Summarizer] cleaned先頭100文字:", cleaned.substring(0, 100));
+  }
+
+  // ステップ4: JSONが途中で切れている場合の修復
+  try {
+    const lastBrace = cleaned.lastIndexOf("}");
+    if (lastBrace !== -1) {
+      const truncated = cleaned.substring(0, lastBrace + 1) + "]";
+      const start = truncated.indexOf("[");
+      if (start !== -1) {
+        const fixed = truncated.substring(start);
+        const parsed = JSON.parse(fixed);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          console.log("[Summarizer] 切り詰めパース成功:", parsed.length, "件");
+          return parsed;
+        }
+      }
+    }
   } catch { /* fall through */ }
 
-  // 2. ```json ... ``` ブロック
-  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlockMatch) {
-    try {
-      const parsed = JSON.parse(codeBlockMatch[1].trim());
-      if (Array.isArray(parsed)) return parsed;
-    } catch { /* fall through */ }
-  }
-
-  // 3. [...] を探す
-  const arrayMatch = text.match(/\[[\s\S]*\]/);
-  if (arrayMatch) {
-    try {
-      const parsed = JSON.parse(arrayMatch[0]);
-      if (Array.isArray(parsed)) return parsed;
-    } catch { /* fall through */ }
-  }
+  // ステップ5: 元テキストから直接パース（コードブロックなしの場合）
+  try {
+    const direct = JSON.parse(text.trim());
+    if (Array.isArray(direct)) {
+      console.log("[Summarizer] 直接パース成功:", direct.length, "件");
+      return direct;
+    }
+  } catch { /* fall through */ }
 
   console.log(
-    "[Summarizer] JSON parse completely failed. Raw text:",
-    text.substring(0, 500),
+    "[Summarizer] 全パース方法失敗. Raw先頭200:",
+    text.substring(0, 200),
   );
   return [];
 }
