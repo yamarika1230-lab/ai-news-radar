@@ -14,7 +14,7 @@ const client = new Anthropic({
 });
 
 const MODEL = "claude-sonnet-4-5";
-const BATCH_SIZE = 8;
+const BATCH_SIZE = 10;
 
 // ---------------------------------------------------------------------------
 // システムプロンプト

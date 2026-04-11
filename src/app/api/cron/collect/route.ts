@@ -240,8 +240,14 @@ export async function GET(request: Request) {
       "RSS/Blogs": 10,
       "Google News": 8,
       X: 20,
-      Qiita: 5,
-      note: 5,
+      Qiita: 10,
+      note: 10,
+      // 個別 RSS ソース名
+      "日経クロステック": 10,
+      OpenAI: 5,
+      "Google AI": 5,
+      "ITmedia AI+": 5,
+      "ZDNET Japan": 5,
     };
 
     const balanced = balanceBySource(unique, SOURCE_LIMITS);
@@ -249,8 +255,8 @@ export async function GET(request: Request) {
       `[cron] ソースバランス調整: ${unique.length} → ${balanced.length}件`,
     );
 
-    // さらに全体で最大40件に絞る（スコア順）
-    const MAX_ARTICLES = 40;
+    // さらに全体で最大80件に絞る（スコア順）
+    const MAX_ARTICLES = 80;
     const prioritized =
       balanced.length > MAX_ARTICLES
         ? [...balanced]
@@ -279,11 +285,16 @@ export async function GET(request: Request) {
 
     // スコア20以下の低品質記事を除外
     const articles = allArticles.filter((a) => a.score > 20);
-    if (allArticles.length !== articles.length) {
-      console.log(
-        `[cron] スコアフィルタ: ${allArticles.length} → ${articles.length}件（スコア20以下を${allArticles.length - articles.length}件除外）`,
-      );
-    }
+    console.log(
+      `[cron] Summarizer処理後: ${allArticles.length}件 → スコアフィルタ後: ${articles.length}件`,
+    );
+
+    // ソース別件数の内訳
+    const sourceCounts: Record<string, number> = {};
+    articles.forEach((a) => {
+      sourceCounts[a.source] = (sourceCounts[a.source] ?? 0) + 1;
+    });
+    console.log(`[cron] ソース別件数: ${JSON.stringify(sourceCounts)}`);
 
     // -----------------------------------------------------------------------
     // 5. トレンドキーワード:
