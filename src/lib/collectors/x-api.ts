@@ -1,4 +1,5 @@
 import type { Collector, RawArticle } from "../types";
+import { isWithinHours } from "../utils";
 
 const TIMEOUT_MS = 15_000;
 const QUERY_DELAY_MS = 200;
@@ -207,10 +208,16 @@ const xApi: Collector = {
       }
     }
 
-    console.log(`[X API] 全クエリ合計: ${allTweets.length}件（重複除去済み）`);
+    // 36時間以内のツイートのみ
+    const recentTweets = allTweets.filter(
+      (t) => !t.created_at || isWithinHours(t.created_at, 36),
+    );
+    console.log(
+      `[X API] 全クエリ合計: ${allTweets.length}件 → 36h内: ${recentTweets.length}件`,
+    );
 
     // エンゲージメントスコア順ソート → 上位N件
-    const sorted = [...allTweets]
+    const sorted = [...recentTweets]
       .sort((a, b) => engagementScore(b) - engagementScore(a))
       .slice(0, MAX_RESULTS);
 

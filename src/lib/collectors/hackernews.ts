@@ -1,5 +1,6 @@
 import type { Collector, RawArticle } from "../types";
 import { fetchWithTimeout } from "./utils";
+import { isWithinHours } from "../utils";
 
 const HN_API = "https://hacker-news.firebaseio.com/v0";
 
@@ -53,8 +54,9 @@ const hackernews: Collector = {
           metadata: { by: item.by, hnId: item.id },
         }));
 
-      console.log(`[HackerNews] ${articles.length}件取得`);
-      return articles;
+      const recent = articles.filter((a) => isWithinHours(a.publishedAt, 36));
+      console.log(`[HackerNews] ${recent.length}件取得 (36h内, 全${articles.length}件)`);
+      return recent;
     } catch (error) {
       console.log(`[HackerNews] 取得失敗:`, error);
       return [];

@@ -1,5 +1,6 @@
 import Parser from "rss-parser";
 import type { Collector, RawArticle } from "../types";
+import { isWithinHours } from "../utils";
 
 const PH_RSS_URL = "https://www.producthunt.com/feed";
 
@@ -33,8 +34,9 @@ const producthunt: Collector = {
           metadata: { guid: item.guid },
         }));
 
-      console.log(`[ProductHunt] ${articles.length}件取得`);
-      return articles;
+      const recent = articles.filter((a) => isWithinHours(a.publishedAt, 36));
+      console.log(`[ProductHunt] ${recent.length}件取得 (36h内, 全${articles.length}件)`);
+      return recent;
     } catch (error) {
       console.log(`[ProductHunt] 取得失敗:`, error);
       return [];

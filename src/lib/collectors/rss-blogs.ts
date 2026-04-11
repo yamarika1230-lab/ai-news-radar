@@ -7,15 +7,13 @@ const AI_KEYWORDS =
 const RSS_FEEDS = [
   { name: "OpenAI", url: "https://openai.com/blog/rss.xml" },
   { name: "Google AI", url: "https://blog.google/technology/ai/rss/" },
-  {
-    name: "日経クロステック",
-    url: "https://xtech.nikkei.com/rss/index.rdf",
-    filter: true,
-  },
+  { name: "日経クロステック", url: "https://xtech.nikkei.com/rss/index.rdf", filter: true },
+  { name: "ITmedia AI+", url: "https://rss.itmedia.co.jp/rss/2.0/aiplus.xml" },
+  { name: "ZDNET Japan", url: "https://japan.zdnet.com/rss/index.rdf", filter: true },
 ];
 
-// 48時間のカットオフ
-const CUTOFF_MS = 48 * 60 * 60 * 1000;
+// 36時間のカットオフ
+const CUTOFF_MS = 36 * 60 * 60 * 1000;
 
 const parser = new Parser({
   timeout: 10_000,

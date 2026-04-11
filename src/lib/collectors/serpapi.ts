@@ -5,7 +5,7 @@ const SERPAPI_BASE = "https://serpapi.com/search.json";
 const TIMEOUT_MS = 10_000;
 
 // ---------------------------------------------------------------------------
-// (A) Google ニュース検索
+// (A) Google ニュース検索 — 複数クエリ
 // ---------------------------------------------------------------------------
 
 interface SerpNewsResult {
@@ -15,6 +15,14 @@ interface SerpNewsResult {
   source?: string | { name?: string };
   date?: string;
 }
+
+const NEWS_QUERIES = [
+  { q: "AI artificial intelligence LLM", hl: "en", gl: "us" },
+  { q: "企業 AI活用 導入", hl: "ja", gl: "jp" },
+  { q: "AI 資金調達 企業価値", hl: "ja", gl: "jp" },
+  { q: "AI insurance fintech healthcare", hl: "en", gl: "us" },
+  { q: "生成AI 業務効率化 DX", hl: "ja", gl: "jp" },
+];
 
 const serpapi: Collector = {
   name: "Google News",
@@ -26,163 +34,162 @@ const serpapi: Collector = {
       return [];
     }
 
-    // まず google_news エンジンを試し、ダメなら google+tbm=nws にフォールバック
-    const articles = await collectWithGoogleNews(apiKey);
-    if (articles.length > 0) return articles;
+    const allArticles: RawArticle[] = [];
+    const seenUrls = new Set<string>();
 
-    console.log("[SerpApi] google_news 0件 — tbm=nws にフォールバック");
-    return await collectWithGoogleTbm(apiKey);
+    for (const nq of NEWS_QUERIES) {
+      try {
+        const params = new URLSearchParams({
+          engine: "google",
+          q: nq.q,
+          tbm: "nws",
+          num: "5",
+          tbs: "qdr:d2",
+          hl: nq.hl,
+          gl: nq.gl,
+          api_key: apiKey,
+        });
+
+        const res = await fetchWithTimeout(
+          `${SERPAPI_BASE}?${params.toString()}`,
+          {},
+          TIMEOUT_MS,
+        );
+
+        if (!res.ok) continue;
+
+        const data = await res.json();
+        const d = data as Record<string, unknown>;
+        const results = ((d.news_results ?? d.organic_results ?? []) as SerpNewsResult[]);
+
+        for (const r of results) {
+          if (!r.link || !r.title) continue;
+          const norm = r.link.split("?")[0].toLowerCase();
+          if (seenUrls.has(norm)) continue;
+          seenUrls.add(norm);
+
+          allArticles.push({
+            title: r.title,
+            url: r.link,
+            source: "Google News",
+            content: r.snippet ?? "",
+            publishedAt: parseRelativeDate(r.date),
+            metadata: {
+              newsSource: typeof r.source === "object" ? r.source?.name : r.source,
+              query: nq.q,
+            },
+          });
+        }
+
+        console.log(`[SerpApi] "${nq.q}": ${results.length}件`);
+      } catch (error) {
+        console.log(`[SerpApi] "${nq.q}" 失敗:`, error);
+      }
+    }
+
+    const limited = allArticles.slice(0, 10);
+    console.log(`[SerpApi] Google News合計: ${limited.length}件 (全${allArticles.length}件)`);
+    return limited;
   },
 };
 
 // ---------------------------------------------------------------------------
-// google_news エンジン
+// 相対日付パース
 // ---------------------------------------------------------------------------
-
-async function collectWithGoogleNews(
-  apiKey: string,
-): Promise<RawArticle[]> {
-  try {
-    const params = new URLSearchParams({
-      engine: "google_news",
-      q: "AI artificial intelligence LLM",
-      gl: "us",
-      hl: "en",
-      api_key: apiKey,
-    });
-
-    const res = await fetchWithTimeout(
-      `${SERPAPI_BASE}?${params.toString()}`,
-      {},
-      TIMEOUT_MS,
-    );
-    console.log(`[SerpApi] google_news ステータス: ${res.status}`);
-
-    if (!res.ok) return [];
-
-    const data = await res.json();
-    const newsResults = ((data as Record<string, unknown>).news_results ?? []) as SerpNewsResult[];
-    console.log(`[SerpApi] news_results: ${newsResults.length}件`);
-
-    // 10件に制限
-    return mapToArticles(newsResults.slice(0, 10));
-  } catch (error) {
-    console.log("[SerpApi] google_news 失敗:", error);
-    return [];
-  }
-}
-
-// ---------------------------------------------------------------------------
-// フォールバック: google エンジン + tbm=nws
-// ---------------------------------------------------------------------------
-
-async function collectWithGoogleTbm(
-  apiKey: string,
-): Promise<RawArticle[]> {
-  try {
-    const params = new URLSearchParams({
-      engine: "google",
-      q: "AI artificial intelligence LLM",
-      tbm: "nws",
-      num: "10",
-      api_key: apiKey,
-    });
-
-    const res = await fetchWithTimeout(
-      `${SERPAPI_BASE}?${params.toString()}`,
-      {},
-      TIMEOUT_MS,
-    );
-    console.log(`[SerpApi] tbm=nws ステータス: ${res.status}`);
-
-    if (!res.ok) return [];
-
-    const data = await res.json();
-    const d = data as Record<string, unknown>;
-    const newsResults = (d.news_results ?? []) as SerpNewsResult[];
-    const organicResults = (d.organic_results ?? []) as SerpNewsResult[];
-
-    console.log(
-      `[SerpApi] tbm=nws news=${newsResults.length}, organic=${organicResults.length}`,
-    );
-
-    const results = newsResults.length > 0 ? newsResults : organicResults;
-    return mapToArticles(results);
-  } catch (error) {
-    console.log("[SerpApi] tbm=nws 失敗:", error);
-    return [];
-  }
-}
-
-// ---------------------------------------------------------------------------
-// SerpApi レスポンスを RawArticle[] に変換
-// ---------------------------------------------------------------------------
-
-function mapToArticles(results: SerpNewsResult[]): RawArticle[] {
-  return results
-    .filter((r) => r.link && r.title)
-    .map((r) => ({
-      title: r.title!,
-      url: r.link!,
-      source: "Google News",
-      content: r.snippet ?? "",
-      publishedAt: parseRelativeDate(r.date),
-      metadata: {
-        newsSource:
-          typeof r.source === "object" ? r.source?.name : r.source,
-      },
-    }));
-}
 
 function parseRelativeDate(dateStr?: string): string {
   if (!dateStr) return new Date().toISOString();
-
-  const relativeMatch = dateStr.match(
-    /(\d+)\s+(minute|hour|day|week|month)s?\s+ago/i,
-  );
-  if (relativeMatch) {
-    const amount = parseInt(relativeMatch[1], 10);
-    const unit = relativeMatch[2].toLowerCase();
+  const m = dateStr.match(/(\d+)\s+(minute|hour|day|week|month)s?\s+ago/i);
+  if (m) {
     const ms: Record<string, number> = {
-      minute: 60_000,
-      hour: 3_600_000,
-      day: 86_400_000,
-      week: 604_800_000,
-      month: 2_592_000_000,
+      minute: 60_000, hour: 3_600_000, day: 86_400_000,
+      week: 604_800_000, month: 2_592_000_000,
     };
-    return new Date(Date.now() - amount * (ms[unit] ?? 0)).toISOString();
+    return new Date(Date.now() - parseInt(m[1]) * (ms[m[2].toLowerCase()] ?? 0)).toISOString();
   }
-
   const parsed = new Date(dateStr);
-  if (!isNaN(parsed.getTime())) {
-    return parsed.toISOString();
-  }
-
-  return new Date().toISOString();
+  return isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
 }
 
 // ---------------------------------------------------------------------------
-// (B) Google Trends キーワード取得
+// (B) Google Trends 急上昇ワード
 // ---------------------------------------------------------------------------
 
-interface SerpTrendPoint {
-  value: number;
-}
+const AI_TREND_KEYWORDS = [
+  "AI", "人工知能", "ChatGPT", "GPT", "Claude", "Gemini", "LLM",
+  "機械学習", "深層学習", "生成AI", "OpenAI", "Anthropic", "Google AI",
+  "AI活用", "AIエージェント", "プロンプト", "MCP", "Copilot",
+  "NVIDIA", "半導体", "GPU", "データセンター",
+];
 
-interface SerpTimelineData {
-  values: SerpTrendPoint[];
-}
-
-interface SerpInterestOverTime {
-  timeline_data?: SerpTimelineData[];
-}
-
-export async function fetchGoogleTrends(): Promise<TrendingKeyword[]> {
+export async function fetchTrendingSearches(): Promise<TrendingKeyword[]> {
   const apiKey = process.env.SERPAPI_KEY;
-  if (!apiKey) {
-    console.log("[SerpApi] SERPAPI_KEY が未設定 — トレンドスキップ");
+  if (!apiKey) return [];
+
+  try {
+    const params = new URLSearchParams({
+      engine: "google_trends_trending_now",
+      frequency: "realtime",
+      geo: "JP",
+      category: "t",
+      api_key: apiKey,
+    });
+
+    const res = await fetchWithTimeout(
+      `${SERPAPI_BASE}?${params.toString()}`,
+      {},
+      TIMEOUT_MS,
+    );
+
+    if (!res.ok) {
+      console.log(`[SerpApi] TrendingNow HTTP ${res.status}`);
+      return [];
+    }
+
+    const data = await res.json();
+    const searches =
+      (data as Record<string, unknown>).realtime_searches ??
+      (data as Record<string, unknown>).trending_searches ??
+      [];
+
+    const items = (searches as Record<string, unknown>[])
+      .filter((item) => {
+        const title = String(item.query ?? item.title ?? "").toLowerCase();
+        return AI_TREND_KEYWORDS.some((kw) => title.includes(kw.toLowerCase()));
+      })
+      .slice(0, 10)
+      .map((item) => {
+        const keyword = String(item.query ?? item.title ?? "");
+        return {
+          keyword,
+          change: String(
+            item.formatted_traffic ?? item.search_volume ?? "急上昇",
+          ),
+          hot: true,
+          searchUrl: `https://www.google.com/search?q=${encodeURIComponent(keyword)}`,
+        };
+      });
+
+    console.log(`[SerpApi] TrendingNow: ${items.length}件 (AI関連)`);
+    return items;
+  } catch (error) {
+    console.log("[SerpApi] TrendingNow 失敗:", error);
     return [];
   }
+}
+
+// ---------------------------------------------------------------------------
+// (C) 固定キーワードのトレンド比較（フォールバック）
+// ---------------------------------------------------------------------------
+
+export async function fetchGoogleTrends(): Promise<TrendingKeyword[]> {
+  // まず急上昇ワードを試す
+  const trending = await fetchTrendingSearches();
+  if (trending.length > 0) return trending;
+
+  // フォールバック: 固定キーワード比較
+  const apiKey = process.env.SERPAPI_KEY;
+  if (!apiKey) return [];
 
   try {
     const params = new URLSearchParams({
@@ -196,57 +203,80 @@ export async function fetchGoogleTrends(): Promise<TrendingKeyword[]> {
       {},
       TIMEOUT_MS,
     );
-    console.log(`[SerpApi] Trends ステータス: ${res.status}`);
-
     if (!res.ok) return [];
 
     const data = await res.json();
-    const queries = [
-      "Claude Code",
-      "ChatGPT",
-      "Gemini",
-      "Copilot",
-      "AI Agent",
-    ];
-    const interestOverTime = (data as Record<string, unknown>)
-      .interest_over_time as SerpInterestOverTime | undefined;
-    const timeline = interestOverTime?.timeline_data ?? [];
+    const queries = ["Claude Code", "ChatGPT", "Gemini", "Copilot", "AI Agent"];
+    const timeline =
+      ((data as Record<string, unknown>).interest_over_time as
+        | { timeline_data?: { values: { value: number }[] }[] }
+        | undefined)?.timeline_data ?? [];
 
-    if (timeline.length === 0) {
-      console.log("[SerpApi] Trends データが空");
-      return [];
-    }
+    if (timeline.length === 0) return [];
 
-    const keywords: TrendingKeyword[] = queries.map((keyword, i) => {
+    return queries.map((keyword, i) => {
       const values = timeline
         .map((t) => t.values?.[i]?.value ?? 0)
         .filter((v) => v > 0);
-
       let change = "new";
       let hot = false;
-
       if (values.length >= 2) {
-        const current = values[values.length - 1];
-        const previous = values[values.length - 2];
-        if (previous > 0) {
-          const pct = Math.round(
-            ((current - previous) / previous) * 100,
-          );
-          change = pct >= 0 ? `+${pct}%` : `${pct}%`;
-          hot = pct > 50 || current >= 80;
-        }
-      } else if (values.length === 1) {
-        hot = values[0] >= 80;
-        change = "+0%";
+        const pct = Math.round(
+          ((values[values.length - 1] - values[values.length - 2]) /
+            values[values.length - 2]) * 100,
+        );
+        change = pct >= 0 ? `+${pct}%` : `${pct}%`;
+        hot = pct > 50 || values[values.length - 1] >= 80;
       }
+      return {
+        keyword,
+        change,
+        hot,
+        searchUrl: `https://www.google.com/search?q=${encodeURIComponent(keyword)}`,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
 
-      return { keyword, change, hot };
+// ---------------------------------------------------------------------------
+// (D) 関連キーワード取得 (Google Autocomplete)
+// ---------------------------------------------------------------------------
+
+export async function fetchRelatedKeywords(
+  keyword: string,
+): Promise<{ keyword: string; searchUrl: string }[]> {
+  const apiKey = process.env.SERPAPI_KEY;
+  if (!apiKey) return [];
+
+  try {
+    const params = new URLSearchParams({
+      engine: "google_autocomplete",
+      q: keyword,
+      api_key: apiKey,
     });
 
-    console.log(`[SerpApi] Trends: ${keywords.length}件`);
-    return keywords;
-  } catch (error) {
-    console.log("[SerpApi] Trends 失敗:", error);
+    const res = await fetchWithTimeout(
+      `${SERPAPI_BASE}?${params.toString()}`,
+      {},
+      5_000,
+    );
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    const suggestions = ((data as Record<string, unknown>).suggestions ??
+      []) as Record<string, unknown>[];
+
+    return suggestions
+      .map((s) => String(s.value ?? s.suggestion ?? ""))
+      .filter((s) => s.length > 0)
+      .slice(0, 5)
+      .map((s) => ({
+        keyword: s,
+        searchUrl: `https://www.google.com/search?q=${encodeURIComponent(s)}`,
+      }));
+  } catch {
     return [];
   }
 }

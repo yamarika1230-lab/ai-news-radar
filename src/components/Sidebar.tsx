@@ -4,10 +4,6 @@ import type { ProcessedArticle, TrendingKeyword, SourceStatus as SourceStatusTyp
 import TrendingKeywords from "./TrendingKeywords";
 import SourceStatusComp from "./SourceStatus";
 
-// ---------------------------------------------------------------------------
-// カテゴリ定義
-// ---------------------------------------------------------------------------
-
 const CATEGORIES: {
   value: ProcessedArticle["category"] | null;
   label: string;
@@ -22,13 +18,11 @@ const CATEGORIES: {
   { value: "other", label: "その他", color: "#7A7A70", bg: "#F0F0EC" },
 ];
 
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
-
 interface SidebarProps {
   selectedCategory: ProcessedArticle["category"] | null;
   onCategoryChange: (category: ProcessedArticle["category"] | null) => void;
+  selectedSource: string | null;
+  onSourceChange: (source: string | null) => void;
   trendingKeywords: TrendingKeyword[];
   sourceStatus: SourceStatusType[];
 }
@@ -36,6 +30,8 @@ interface SidebarProps {
 export default function Sidebar({
   selectedCategory,
   onCategoryChange,
+  selectedSource,
+  onSourceChange,
   trendingKeywords,
   sourceStatus,
 }: SidebarProps) {
@@ -73,17 +69,14 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* 区切り */}
       <div className="h-px bg-[#E8E8E4]" />
-
-      {/* トレンドキーワード */}
       <TrendingKeywords keywords={trendingKeywords} />
-
-      {/* 区切り */}
       <div className="h-px bg-[#E8E8E4]" />
-
-      {/* ソースステータス */}
-      <SourceStatusComp statuses={sourceStatus} />
+      <SourceStatusComp
+        statuses={sourceStatus}
+        selectedSource={selectedSource}
+        onSourceChange={onSourceChange}
+      />
     </>
   );
 }

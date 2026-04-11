@@ -6,15 +6,7 @@ import Header from "./Header";
 import Sidebar from "./Sidebar";
 import NewsCard from "./NewsCard";
 
-// ---------------------------------------------------------------------------
-// 状態型
-// ---------------------------------------------------------------------------
-
 type LoadState = "loading" | "ready" | "error";
-
-// ---------------------------------------------------------------------------
-// コンポーネント
-// ---------------------------------------------------------------------------
 
 export default function Dashboard() {
   const [digest, setDigest] = useState<DailyDigest | null>(null);
@@ -22,11 +14,8 @@ export default function Dashboard() {
   const [selectedCategory, setSelectedCategory] = useState<
     ProcessedArticle["category"] | null
   >(null);
+  const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  // -----------------------------------------------------------------------
-  // データ取得
-  // -----------------------------------------------------------------------
 
   const fetchData = useCallback(async () => {
     try {
@@ -48,7 +37,6 @@ export default function Dashboard() {
     fetchData();
   }, [fetchData]);
 
-  // モバイルでサイドバーが開いているときに背景スクロール抑止
   useEffect(() => {
     document.body.style.overflow = sidebarOpen ? "hidden" : "";
     return () => {
@@ -56,25 +44,24 @@ export default function Dashboard() {
     };
   }, [sidebarOpen]);
 
-  // -----------------------------------------------------------------------
-  // 算出
-  // -----------------------------------------------------------------------
-
   const articles = digest?.articles ?? [];
   const trendingKeywords = digest?.trendingKeywords ?? [];
   const sourceStatus = digest?.sourceStatus ?? [];
   const activeSourceCount = sourceStatus.filter(
     (s) => s.status === "ok",
   ).length;
-  const sortedArticles = [...articles].sort((a, b) => b.score - a.score);
 
-  // -----------------------------------------------------------------------
-  // UI
-  // -----------------------------------------------------------------------
+  // カテゴリ + ソース フィルタ（AND条件）
+  const filteredArticles = articles.filter((a) => {
+    if (selectedSource && a.source !== selectedSource) return false;
+    return true;
+  });
+  const sortedArticles = [...filteredArticles].sort(
+    (a, b) => b.score - a.score,
+  );
 
   return (
     <div className="flex min-h-screen flex-col">
-      {/* ヘッダー */}
       <Header
         lastUpdated={digest?.lastUpdated ?? null}
         activeSourceCount={activeSourceCount}
@@ -84,9 +71,6 @@ export default function Dashboard() {
       />
 
       <div className="flex flex-1">
-        {/* ----- サイドバー ----- */}
-
-        {/* モバイルオーバーレイ */}
         {sidebarOpen && (
           <div
             className="fixed inset-0 z-30 bg-black/20 lg:hidden"
@@ -94,7 +78,6 @@ export default function Dashboard() {
           />
         )}
 
-        {/* サイドバー本体 */}
         <aside
           className={`
             fixed inset-y-0 left-0 z-40 w-64 overflow-y-auto bg-[#F8F8F6] px-4 pb-6 pt-20
@@ -110,14 +93,36 @@ export default function Dashboard() {
                 setSelectedCategory(cat);
                 setSidebarOpen(false);
               }}
+              selectedSource={selectedSource}
+              onSourceChange={(src) => {
+                setSelectedSource(src);
+                setSidebarOpen(false);
+              }}
               trendingKeywords={trendingKeywords}
               sourceStatus={sourceStatus}
             />
           </div>
         </aside>
 
-        {/* ----- メインコンテンツ ----- */}
         <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
+          {/* ソースフィルタバッジ */}
+          {selectedSource && (
+            <div className="mx-auto mb-4 max-w-3xl">
+              <span className="inline-flex items-center gap-2 rounded-xl bg-[#F0EEFF] px-3 py-1.5 text-xs font-medium text-[#7C6FE0]">
+                {selectedSource}の記事を表示中
+                <button
+                  type="button"
+                  onClick={() => setSelectedSource(null)}
+                  className="ml-1 rounded-full p-0.5 hover:bg-[#E0DCFF]"
+                >
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </span>
+            </div>
+          )}
+
           {loadState === "loading" && <LoadingSkeleton />}
           {loadState === "error" && <ErrorState onRetry={fetchData} />}
           {loadState === "ready" && sortedArticles.length === 0 && (
@@ -136,18 +141,11 @@ export default function Dashboard() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// サブコンポーネント
-// ---------------------------------------------------------------------------
-
 function LoadingSkeleton() {
   return (
     <div className="mx-auto max-w-3xl space-y-3">
       {Array.from({ length: 5 }).map((_, i) => (
-        <div
-          key={i}
-          className="animate-pulse rounded-2xl bg-white p-4"
-        >
+        <div key={i} className="animate-pulse rounded-2xl bg-white p-4">
           <div className="flex gap-4">
             <div className="h-12 w-12 rounded-xl bg-[#F0F0EC]" />
             <div className="flex-1 space-y-2">

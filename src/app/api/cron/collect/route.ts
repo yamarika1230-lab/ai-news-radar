@@ -8,7 +8,7 @@ import rssBlogs from "@/lib/collectors/rss-blogs";
 // import grok from "@/lib/collectors/grok"; // Grok → X API に置き換え
 import xApi from "@/lib/collectors/x-api";
 import serpapi from "@/lib/collectors/serpapi";
-import { fetchGoogleTrends } from "@/lib/collectors/serpapi";
+import { fetchGoogleTrends, fetchRelatedKeywords } from "@/lib/collectors/serpapi";
 import { summarizeAndClassify, extractTrendingKeywords } from "@/lib/summarizer";
 import { saveDailyDigest, updateSourceStatus } from "@/lib/storage";
 import type { Collector, RawArticle, SourceStatus, TrendingKeyword } from "@/lib/types";
@@ -296,6 +296,19 @@ export async function GET(request: Request) {
         () => extractTrendingKeywords(articles),
         "extractTrendingKeywords",
       );
+    }
+
+    // 上位5キーワードの関連キーワードを取得
+    for (let k = 0; k < Math.min(5, trendingKeywords.length); k++) {
+      try {
+        const related = await fetchRelatedKeywords(trendingKeywords[k].keyword);
+        if (related.length > 0) {
+          trendingKeywords[k].relatedKeywords = related;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      } catch {
+        // 関連キーワード取得失敗は無視
+      }
     }
 
     // -----------------------------------------------------------------------

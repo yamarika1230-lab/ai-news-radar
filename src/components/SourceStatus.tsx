@@ -5,9 +5,15 @@ import type { SourceStatus as SourceStatusType } from "@/lib/types";
 
 interface SourceStatusProps {
   statuses: SourceStatusType[];
+  selectedSource: string | null;
+  onSourceChange: (source: string | null) => void;
 }
 
-export default function SourceStatus({ statuses }: SourceStatusProps) {
+export default function SourceStatus({
+  statuses,
+  selectedSource,
+  onSourceChange,
+}: SourceStatusProps) {
   if (statuses.length === 0) {
     return (
       <div>
@@ -24,11 +30,19 @@ export default function SourceStatus({ statuses }: SourceStatusProps) {
       <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#A0A09C]">
         ソースステータス
       </h3>
-      <div className="space-y-1.5">
+      <div className="space-y-1">
         {statuses.map((s) => (
-          <div
+          <button
             key={s.name}
-            className="flex items-center justify-between rounded-xl bg-white px-3 py-2"
+            type="button"
+            onClick={() =>
+              onSourceChange(selectedSource === s.name ? null : s.name)
+            }
+            className="flex w-full items-center justify-between rounded-xl px-3 py-2 transition-colors"
+            style={{
+              backgroundColor:
+                selectedSource === s.name ? "#F0EEFF" : "white",
+            }}
           >
             <div className="flex items-center gap-2">
               <span
@@ -40,7 +54,15 @@ export default function SourceStatus({ statuses }: SourceStatusProps) {
                       : "bg-[#E07050]"
                 }`}
               />
-              <span className="text-sm text-[#2D2D2D]">{s.name}</span>
+              <span
+                className="text-sm"
+                style={{
+                  color: selectedSource === s.name ? "#7C6FE0" : "#2D2D2D",
+                  fontWeight: selectedSource === s.name ? 600 : 400,
+                }}
+              >
+                {s.name}
+              </span>
             </div>
             <div className="flex items-center gap-2 text-[11px] text-[#A0A09C]">
               <span>{s.count}件</span>
@@ -48,7 +70,7 @@ export default function SourceStatus({ statuses }: SourceStatusProps) {
                 <span>{dayjs(s.lastRun).format("HH:mm")}</span>
               )}
             </div>
-          </div>
+          </button>
         ))}
       </div>
     </div>

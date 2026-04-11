@@ -29,6 +29,8 @@ export interface TrendingKeyword {
   keyword: string;
   change: string;
   hot: boolean;
+  searchUrl?: string;
+  relatedKeywords?: { keyword: string; searchUrl: string }[];
 }
 
 /** ソースステータス */
