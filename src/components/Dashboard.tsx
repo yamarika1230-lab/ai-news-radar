@@ -51,9 +51,26 @@ export default function Dashboard() {
     (s) => s.status === "ok",
   ).length;
 
+  // ソース名マッピング（ステータス名→記事のsource値群）
+  const SOURCE_MAPPING: Record<string, string[]> = {
+    HackerNews: ["HackerNews"],
+    ProductHunt: ["ProductHunt"],
+    GitHub: ["GitHub"],
+    arXiv: ["arXiv"],
+    "RSS/Blogs": [
+      "RSS/Blogs", "OpenAI", "Google AI", "日経クロステック",
+      "ITmedia AI+", "ZDNET Japan",
+    ],
+    X: ["X"],
+    "Google News": ["Google News"],
+  };
+
   // カテゴリ + ソース フィルタ（AND条件）
   const filteredArticles = articles.filter((a) => {
-    if (selectedSource && a.source !== selectedSource) return false;
+    if (selectedSource) {
+      const matchingSources = SOURCE_MAPPING[selectedSource] ?? [selectedSource];
+      if (!matchingSources.includes(a.source)) return false;
+    }
     return true;
   });
   const sortedArticles = [...filteredArticles].sort(

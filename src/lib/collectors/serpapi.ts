@@ -116,10 +116,33 @@ function parseRelativeDate(dateStr?: string): string {
 // ---------------------------------------------------------------------------
 
 const AI_TREND_KEYWORDS = [
+  // A. 技術の移行トレンド
   "AI", "人工知能", "ChatGPT", "GPT", "Claude", "Gemini", "LLM",
-  "機械学習", "深層学習", "生成AI", "OpenAI", "Anthropic", "Google AI",
-  "AI活用", "AIエージェント", "プロンプト", "MCP", "Copilot",
-  "NVIDIA", "半導体", "GPU", "データセンター",
+  "生成AI", "OpenAI", "Anthropic", "Google AI", "Copilot", "Grok",
+  "Llama", "Mistral", "NVIDIA", "GPU", "半導体",
+  "AIエージェント", "AI Agent", "マルチエージェント", "自律型AI",
+  "エージェント", "Agentic", "MCP", "ツール連携",
+  "プロンプト", "プロンプトエンジニアリング", "Claude Code",
+  "Cursor", "Devin", "vibe coding", "AI駆動開発",
+  // B. 企業の実課題（B2B）
+  "AI ガバナンス", "AIガバナンス", "AI セキュリティ", "AIセキュリティ",
+  "AI規制", "AI法", "責任あるAI", "AI倫理",
+  "AI導入", "AI活用", "業務効率化", "DX", "デジタルトランスフォーメーション",
+  "AI 自動化", "RPA AI", "業務改革",
+  "RAG", "ベクトルDB", "ナレッジマネジメント AI", "データ基盤",
+  // C. 検索の未来・マーケティング
+  "AEO", "GEO", "AI検索", "AIオーバービュー", "AI Overview",
+  "SearchGPT", "Perplexity", "AI SEO",
+  "LLM 比較", "AI 比較", "LLM 選定",
+  "AI 投資", "AI 株", "AI スタートアップ", "AI 資金調達",
+  "Palantir", "データセンター",
+  // D. AGI・汎用人工知能
+  "AGI", "汎用人工知能", "ASI", "超知能", "人工超知能",
+  "スーパーインテリジェンス", "Superintelligence",
+  // E. FDE
+  "FDE", "Forward Deployed Engineer", "フォワードデプロイドエンジニア",
+  "Palantir FDE", "AI実装支援", "AI導入支援", "AI伴走型",
+  "ServiceNow FDE", "Salesforce Agentforce",
 ];
 
 export async function fetchTrendingSearches(): Promise<TrendingKeyword[]> {
@@ -182,62 +205,83 @@ export async function fetchTrendingSearches(): Promise<TrendingKeyword[]> {
 // (C) 固定キーワードのトレンド比較（フォールバック）
 // ---------------------------------------------------------------------------
 
+const COMPARISON_QUERIES = [
+  "生成AI,AIエージェント,マルチエージェント",
+  "プロンプトエンジニアリング,自律型AI,AI駆動開発",
+  "Claude Code,Cursor,Devin",
+  "RAG,AIガバナンス,AI検索",
+  "ChatGPT,Claude,Gemini",
+  "AGI,ASI,汎用人工知能",
+  "FDE,AIコンサルタント,AI導入支援",
+];
+
 export async function fetchGoogleTrends(): Promise<TrendingKeyword[]> {
   // まず急上昇ワードを試す
   const trending = await fetchTrendingSearches();
   if (trending.length > 0) return trending;
 
-  // フォールバック: 固定キーワード比較
+  // フォールバック: 複数比較クエリ
   const apiKey = process.env.SERPAPI_KEY;
   if (!apiKey) return [];
 
-  try {
-    const params = new URLSearchParams({
-      engine: "google_trends",
-      q: "Claude Code,ChatGPT,Gemini,Copilot,AI Agent",
-      api_key: apiKey,
-    });
+  const results: TrendingKeyword[] = [];
 
-    const res = await fetchWithTimeout(
-      `${SERPAPI_BASE}?${params.toString()}`,
-      {},
-      TIMEOUT_MS,
-    );
-    if (!res.ok) return [];
+  for (const qStr of COMPARISON_QUERIES) {
+    if (results.length >= 10) break;
+    try {
+      const params = new URLSearchParams({
+        engine: "google_trends",
+        q: qStr,
+        api_key: apiKey,
+      });
 
-    const data = await res.json();
-    const queries = ["Claude Code", "ChatGPT", "Gemini", "Copilot", "AI Agent"];
-    const timeline =
-      ((data as Record<string, unknown>).interest_over_time as
-        | { timeline_data?: { values: { value: number }[] }[] }
-        | undefined)?.timeline_data ?? [];
+      const res = await fetchWithTimeout(
+        `${SERPAPI_BASE}?${params.toString()}`,
+        {},
+        TIMEOUT_MS,
+      );
+      if (!res.ok) continue;
 
-    if (timeline.length === 0) return [];
+      const data = await res.json();
+      const keywords = qStr.split(",");
+      const timeline =
+        ((data as Record<string, unknown>).interest_over_time as
+          | { timeline_data?: { values: { value: number }[] }[] }
+          | undefined)?.timeline_data ?? [];
 
-    return queries.map((keyword, i) => {
-      const values = timeline
-        .map((t) => t.values?.[i]?.value ?? 0)
-        .filter((v) => v > 0);
-      let change = "new";
-      let hot = false;
-      if (values.length >= 2) {
-        const pct = Math.round(
-          ((values[values.length - 1] - values[values.length - 2]) /
-            values[values.length - 2]) * 100,
-        );
-        change = pct >= 0 ? `+${pct}%` : `${pct}%`;
-        hot = pct > 50 || values[values.length - 1] >= 80;
+      if (timeline.length === 0) continue;
+
+      for (let i = 0; i < keywords.length; i++) {
+        if (results.length >= 10) break;
+        if (results.some((r) => r.keyword === keywords[i])) continue;
+
+        const values = timeline
+          .map((t) => t.values?.[i]?.value ?? 0)
+          .filter((v) => v > 0);
+        let change = "new";
+        let hot = false;
+        if (values.length >= 2) {
+          const pct = Math.round(
+            ((values[values.length - 1] - values[values.length - 2]) /
+              values[values.length - 2]) * 100,
+          );
+          change = pct >= 0 ? `+${pct}%` : `${pct}%`;
+          hot = pct > 50 || values[values.length - 1] >= 80;
+        }
+        results.push({
+          keyword: keywords[i],
+          change,
+          hot,
+          searchUrl: `https://www.google.com/search?q=${encodeURIComponent(keywords[i])}`,
+        });
       }
-      return {
-        keyword,
-        change,
-        hot,
-        searchUrl: `https://www.google.com/search?q=${encodeURIComponent(keyword)}`,
-      };
-    });
-  } catch {
-    return [];
+    } catch {
+      continue;
+    }
   }
+
+  console.log(`[SerpApi] Trends比較フォールバック: ${results.length}件`);
+  return results;
 }
 
 // ---------------------------------------------------------------------------
