@@ -173,8 +173,7 @@ function translateTitleSimple(title: string): string {
   // GitHub リポジトリ名（user/repo形式）
   if (/^[\w.-]+\/[\w.-]+$/.test(title)) {
     const repoName = title.split("/").pop() || title;
-    const readable = repoName.replace(/[-_]/g, " ");
-    return `GitHub: ${readable}（AIツール）`;
+    return `GitHub: ${repoName.replace(/[-_]/g, " ")}（AI関連リポジトリ）`;
   }
 
   // "Show HN:" プレフィックス
@@ -183,7 +182,7 @@ function translateTitleSimple(title: string): string {
   }
 
   // その他の英語タイトル
-  return `${title}（※英語記事）`;
+  return `【英語】${title}`;
 }
 
 /** API失敗時のフォールバック */
@@ -320,9 +319,22 @@ JSON配列のみを返してください。形式:
       const originalLanguage: ProcessedArticle["originalLanguage"] =
         lang === "en" ? "en" : lang === "ja" ? "ja" : "other";
 
+      const claudeTitle = info?.title;
+      const finalTitle = claudeTitle || article.title;
+
+      // 英語タイトルが残存した場合をログ出力
+      if (
+        finalTitle &&
+        !/[\u3000-\u9fff\u30A0-\u30FF\u3040-\u309F]/.test(finalTitle)
+      ) {
+        console.log(
+          `[Summarizer] 英語タイトル残存: "${finalTitle.substring(0, 60)}" ← Claude: ${claudeTitle ? `"${claudeTitle.substring(0, 60)}"` : "なし"}`,
+        );
+      }
+
       return {
         id: generateId(article.url),
-        title: info?.title || article.title,
+        title: finalTitle,
         url: article.url,
         source: article.source,
         summary: info?.summary ?? "",

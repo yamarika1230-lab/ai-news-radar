@@ -84,7 +84,7 @@ function balanceBySource(
 
   const result: RawArticle[] = [];
   for (const [source, items] of Object.entries(bySource)) {
-    const limit = limits[source] ?? 5; // デフォルト5件
+    const limit = limits[source] ?? 15; // デフォルト15件
     // スコア順でソートして上位を選定
     const sorted = [...items].sort(
       (a, b) =>
@@ -234,21 +234,21 @@ export async function GET(request: Request) {
     // 3.5. ソースごとの上限を適用してバランスを調整
     // -----------------------------------------------------------------------
     const SOURCE_LIMITS: Record<string, number> = {
-      HackerNews: 5,
-      ProductHunt: 4,
-      GitHub: 5,
-      arXiv: 5,
-      "RSS/Blogs": 10,
-      "Google News": 8,
+      HackerNews: 10,
+      ProductHunt: 10,
+      GitHub: 10,
+      arXiv: 10,
+      "RSS/Blogs": 15,
+      "Google News": 10,
       X: 20,
       Qiita: 10,
       note: 10,
-      // 個別 RSS ソース名
-      "日経クロステック": 10,
-      OpenAI: 5,
-      "Google AI": 5,
-      "ITmedia AI+": 5,
-      "ZDNET Japan": 5,
+      "日経クロステック": 15,
+      OpenAI: 10,
+      "OpenAI Blog": 10,
+      "Google AI": 10,
+      "ITmedia AI+": 10,
+      "ZDNET Japan": 10,
     };
 
     const balanced = balanceBySource(unique, SOURCE_LIMITS);
@@ -357,6 +357,14 @@ export async function GET(request: Request) {
     // 7. DailyDigest としてストレージに保存
     // -----------------------------------------------------------------------
     const today = dayjs().format("YYYY-MM-DD");
+
+    // ストレージ保存前の最終件数
+    const saveCounts: Record<string, number> = {};
+    articles.forEach((a) => {
+      saveCounts[a.source] = (saveCounts[a.source] ?? 0) + 1;
+    });
+    console.log(`[cron] 7. ストレージ保存件数: ${articles.length}`);
+    console.log(`[cron] 保存ソース別: ${JSON.stringify(saveCounts)}`);
 
     await saveDailyDigest({
       date: today,
