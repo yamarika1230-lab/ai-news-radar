@@ -14,7 +14,7 @@ const client = new Anthropic({
 });
 
 const MODEL = "claude-sonnet-4-5";
-const BATCH_SIZE = 10;
+const BATCH_SIZE = 5;
 
 // ---------------------------------------------------------------------------
 // システムプロンプト
@@ -77,7 +77,12 @@ arXiv論文で実務応用不明確なものは40以下。
 - summary: 日本語要約（150-250文字）
 - category: カテゴリ
 - score: 総合スコア（1-100、50は不可）
-- originalLanguage: "en" / "ja" / "other"`;
+- originalLanguage: "en" / "ja" / "other"
+
+【出力形式の注意】
+レスポンスは純粋なJSON配列のみを返してください。
+マークダウンのコードブロック（\`\`\`json や \`\`\`）で囲まないでください。
+[ で始まり ] で終わるJSON配列をそのまま返してください。`;
 
 // ---------------------------------------------------------------------------
 // ヘルパー
@@ -292,7 +297,7 @@ JSON配列のみを返してください。形式:
 
     const message = await client.messages.create({
       model: MODEL,
-      max_tokens: 2000,
+      max_tokens: 4096,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userPrompt }],
     });
@@ -432,7 +437,71 @@ export async function summarizeAndClassify(
     results.push(...processed);
   }
 
-  // 最終チェック: 英語/中国語のみのタイトルに接頭辞を付ける
+  // 未翻訳記事の再翻訳（Claude API で個別リトライ）
+  const untranslated = results.filter(
+    (a) =>
+      !/[\u3040-\u309f\u30a0-\u30ff]/.test(a.title) &&
+      !a.title.startsWith("【英語】") &&
+      !a.title.startsWith("【中国語】"),
+  );
+
+  if (untranslated.length > 0 && untranslated.length <= 15) {
+    console.log(
+      `[Summarizer] 未翻訳記事の再翻訳: ${untranslated.length}件`,
+    );
+    try {
+      const retryMsg = await client.messages.create({
+        model: MODEL,
+        max_tokens: 4096,
+        system: `以下の記事タイトルを全て日本語に翻訳してください。
+固有名詞（Google, OpenAI, Claude等）は英語のままでOK。
+JSON配列で返してください。形式: [{"index":0,"title":"日本語タイトル","summary":"日本語要約100文字"}]
+コードブロックで囲まないでください。純粋なJSON配列のみ返してください。`,
+        messages: [
+          {
+            role: "user",
+            content: JSON.stringify(
+              untranslated.map((a, i) => ({
+                index: i,
+                originalTitle: a.title,
+                source: a.source,
+              })),
+            ),
+          },
+        ],
+      });
+
+      const retryText =
+        retryMsg.content[0].type === "text" ? retryMsg.content[0].text : "";
+      const retryParsed = parseClaudeResponse(retryText) as {
+        index?: number;
+        title?: string;
+        summary?: string;
+      }[];
+
+      if (retryParsed.length > 0) {
+        console.log(
+          `[Summarizer] 再翻訳成功: ${retryParsed.length}件`,
+        );
+        for (const item of retryParsed) {
+          const idx = item.index ?? -1;
+          if (idx >= 0 && idx < untranslated.length && item.title) {
+            untranslated[idx].title = item.title;
+            if (item.summary && !untranslated[idx].summary) {
+              untranslated[idx].summary = item.summary;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.log(
+        "[Summarizer] 再翻訳失敗:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+
+  // 最終チェック: まだ残っている英語/中国語タイトルに接頭辞を付ける
   for (const article of results) {
     if (!/[\u3040-\u309f\u30a0-\u30ff]/.test(article.title)) {
       article.title = translateTitleSimple(article.title, article.source);
