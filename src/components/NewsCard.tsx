@@ -38,6 +38,10 @@ const SOURCE_STYLE: Record<string, string> = {
   X: "#1DA1F2",
   "PR TIMES (AI)": "#0075C2",
   "日経クロステック": "#C41A30",
+  "ITmedia AI+": "#E60033",
+  "ZDNET Japan": "#0066CC",
+  Qiita: "#55C500",
+  note: "#41C9B4",
 };
 
 // ---------------------------------------------------------------------------

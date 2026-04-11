@@ -8,6 +8,8 @@ import rssBlogs from "@/lib/collectors/rss-blogs";
 // import grok from "@/lib/collectors/grok"; // Grok → X API に置き換え
 import xApi from "@/lib/collectors/x-api";
 import serpapi from "@/lib/collectors/serpapi";
+import qiita from "@/lib/collectors/qiita";
+import noteCollector from "@/lib/collectors/note";
 import { fetchGoogleTrends, fetchRelatedKeywords } from "@/lib/collectors/serpapi";
 import { summarizeAndClassify, extractTrendingKeywords } from "@/lib/summarizer";
 import { saveDailyDigest, updateSourceStatus } from "@/lib/storage";
@@ -27,6 +29,8 @@ const collectors: Collector[] = [
   rssBlogs,
   xApi,
   serpapi,
+  qiita,
+  noteCollector,
 ];
 
 // ---------------------------------------------------------------------------
@@ -236,6 +240,8 @@ export async function GET(request: Request) {
       "RSS/Blogs": 10,
       "Google News": 8,
       X: 20,
+      Qiita: 5,
+      note: 5,
     };
 
     const balanced = balanceBySource(unique, SOURCE_LIMITS);
@@ -298,17 +304,34 @@ export async function GET(request: Request) {
       );
     }
 
-    // 上位5キーワードの関連キーワードを取得
-    for (let k = 0; k < Math.min(5, trendingKeywords.length); k++) {
+    // 急上昇率で降順ソート
+    trendingKeywords.sort((a, b) => {
+      const extractNum = (change: string): number => {
+        if (change.includes("急上昇") || change.includes("Breakout")) return 9999;
+        const m = change.match(/([+-]?\d+)/);
+        return m ? parseInt(m[1]) : 0;
+      };
+      return extractNum(b.change) - extractNum(a.change);
+    });
+
+    // 上位10キーワードの関連キーワードを取得（API上限ガード付き）
+    const maxRelatedQueries = 10;
+    let queriesUsed = 0;
+    for (let k = 0; k < Math.min(10, trendingKeywords.length); k++) {
+      if (queriesUsed >= maxRelatedQueries) {
+        console.log("[Trends] 関連キーワード取得上限到達、残りはスキップ");
+        break;
+      }
       try {
         const related = await fetchRelatedKeywords(trendingKeywords[k].keyword);
         if (related.length > 0) {
           trendingKeywords[k].relatedKeywords = related;
         }
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        queriesUsed++;
       } catch {
-        // 関連キーワード取得失敗は無視
+        console.log(`[Trends] 関連キーワード取得失敗: ${trendingKeywords[k].keyword}`);
       }
+      await new Promise((resolve) => setTimeout(resolve, 200));
     }
 
     // -----------------------------------------------------------------------

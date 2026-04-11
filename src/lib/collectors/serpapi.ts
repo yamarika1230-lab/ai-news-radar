@@ -143,6 +143,20 @@ const AI_TREND_KEYWORDS = [
   "FDE", "Forward Deployed Engineer", "フォワードデプロイドエンジニア",
   "Palantir FDE", "AI実装支援", "AI導入支援", "AI伴走型",
   "ServiceNow FDE", "Salesforce Agentforce",
+  // F. NotebookLM・AIノート
+  "NotebookLM", "Notebook LM", "Google NotebookLM",
+  "AI ノート", "AIノートブック",
+  "Audio Overview", "オーディオオーバービュー",
+  // G. RAI（Responsible AI）
+  "RAI", "Responsible AI",
+  "AI公平性", "AIバイアス", "AI透明性",
+  "Explainable AI", "XAI", "AI監査",
+  "Trustworthy AI", "信頼できるAI",
+  // H. AIO（AI Optimization / AI運用最適化）
+  "AIO", "AI Optimization", "AI最適化",
+  "AIOps", "AI運用", "MLOps", "LLMOps",
+  "AI基盤運用", "AI監視", "推論コスト",
+  "AI Observability", "AI可観測性",
 ];
 
 export async function fetchTrendingSearches(): Promise<TrendingKeyword[]> {
@@ -213,6 +227,9 @@ const COMPARISON_QUERIES = [
   "ChatGPT,Claude,Gemini",
   "AGI,ASI,汎用人工知能",
   "FDE,AIコンサルタント,AI導入支援",
+  "NotebookLM,Perplexity,ChatGPT",
+  "RAI,AIガバナンス,AI倫理",
+  "AIOps,MLOps,LLMOps",
 ];
 
 export async function fetchGoogleTrends(): Promise<TrendingKeyword[]> {
