@@ -358,6 +358,26 @@ export async function GET(request: Request) {
     // -----------------------------------------------------------------------
     const today = dayjs().format("YYYY-MM-DD");
 
+    // 最終チェック: 日本語を含まないタイトルに接頭辞を付ける
+    for (const a of articles) {
+      const hasHiraganaKatakana = /[\u3040-\u309f\u30a0-\u30ff]/.test(a.title);
+      if (!hasHiraganaKatakana) {
+        const hasKanjiOnly = /[\u4e00-\u9fff]/.test(a.title);
+        if (hasKanjiOnly) {
+          a.title = `【中国語】${a.title}`;
+        } else if (/^[a-zA-Z0-9\s\-_.:,;!?'"()\[\]{}\/&@#$%^*+=<>~`|\\]/.test(a.title)) {
+          a.title = `【英語】${a.title}`;
+        }
+      }
+    }
+
+    const untranslated = articles.filter(
+      (a) => a.title.startsWith("【英語】") || a.title.startsWith("【中国語】"),
+    ).length;
+    console.log(
+      `[cron] 未翻訳タイトル: ${untranslated}件 / ${articles.length}件`,
+    );
+
     // ストレージ保存前の最終件数
     const saveCounts: Record<string, number> = {};
     articles.forEach((a) => {

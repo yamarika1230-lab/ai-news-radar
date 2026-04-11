@@ -19,17 +19,22 @@ const BATCH_SIZE = 10;
 // ---------------------------------------------------------------------------
 // システムプロンプト
 // ---------------------------------------------------------------------------
-const SYSTEM_PROMPT = `【絶対ルール - 全ての記事に適用】
-あなたが返すJSONの全ての"title"フィールドは、必ず日本語で記述してください。
-英語のタイトルをそのまま返すことは一切許可しません。
-英語の記事であっても、必ず日本語に翻訳してください。
-返す前に全てのtitleをチェックし、日本語（ひらがな・カタカナ・漢字）が
-1文字も含まれていないtitleがある場合、そのtitleを日本語に翻訳し直してください。
+const SYSTEM_PROMPT = `【最優先ルール — 例外なし】
+全ての記事の"title"と"summary"は、必ず日本語で出力してください。
 
-★★★ 最重要ルール ★★★
-全ての記事のtitleは必ず日本語で出力してください。
-英語の記事タイトルをそのまま返すことは絶対に禁止です。
-必ず日本語に翻訳し、内容が端的にわかるタイトルにしてください。
+以下は絶対に禁止:
+- 英語のタイトルをそのまま返すこと
+- 中国語のタイトルをそのまま返すこと
+- 翻訳せずに原文を返すこと
+
+必ず自然な日本語に翻訳してから返してください。
+固有名詞（Google, OpenAI, Claude, GPT, GitHub等）は英語のままでOKです。
+それ以外の部分は全て日本語にしてください。
+
+翻訳例:
+- "Alibaba bets $290M on world models" → "アリババ、ワールドモデルに2.9億ドルを投資"
+- "数字生命KKKKhazix AI Skills合集" → "中国発AIスキル集がGitHubで注目 — 1400スター獲得"
+- "Act Wisely: Cultivating Meta-Cognitive Tool Use" → "AIエージェントのメタ認知ツール活用を育成する新手法"
 
 良い例:
 - "Instant 1.0, a backend for AI-coded apps" → "Instant 1.0 — AIコーディングアプリ向け新バックエンドが登場"
@@ -108,65 +113,51 @@ function chunk<T>(arr: T[], size: number): T[][] {
 
 /** JSON配列を堅牢にパース */
 function parseClaudeResponse(text: string): unknown[] {
-  // ステップ1: ```json ... ``` のコードブロックを除去
-  let cleaned = text;
+  let cleaned = text.trim();
 
-  const codeBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-  if (codeBlockMatch) {
-    cleaned = codeBlockMatch[1].trim();
-    console.log("[Summarizer] コードブロック除去済み");
+  // Step 1: ```json ... ``` を除去
+  const codeBlockRegex = /```(?:json)?\s*\n?([\s\S]*?)```/;
+  const match = cleaned.match(codeBlockRegex);
+  if (match) {
+    cleaned = match[1].trim();
+    console.log("[Summarizer] コードブロック除去成功, 長さ:", cleaned.length);
   }
 
-  // ステップ2: 先頭・末尾の余分な文字を除去し [ ] を探す
-  cleaned = cleaned.trim();
-  const bracketStart = cleaned.indexOf("[");
-  const bracketEnd = cleaned.lastIndexOf("]");
-  if (bracketStart !== -1 && bracketEnd !== -1 && bracketEnd > bracketStart) {
-    cleaned = cleaned.substring(bracketStart, bracketEnd + 1);
+  // Step 2: [ ] の範囲を特定
+  const firstBracket = cleaned.indexOf("[");
+  const lastBracket = cleaned.lastIndexOf("]");
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    cleaned = cleaned.substring(firstBracket, lastBracket + 1);
   }
 
-  // ステップ3: パース試行
+  // Step 3: パース試行
   try {
-    const parsed = JSON.parse(cleaned);
-    if (Array.isArray(parsed)) {
-      console.log("[Summarizer] パース成功:", parsed.length, "件");
-      return parsed;
+    const result = JSON.parse(cleaned);
+    if (Array.isArray(result) && result.length > 0) {
+      console.log("[Summarizer] パース成功:", result.length, "件");
+      return result;
     }
   } catch (e) {
     console.log("[Summarizer] パースエラー:", (e as Error).message);
-    console.log("[Summarizer] cleaned先頭100文字:", cleaned.substring(0, 100));
   }
 
-  // ステップ4: JSONが途中で切れている場合の修復
+  // Step 4: JSONが途中で切れている場合の修復
   try {
     const lastBrace = cleaned.lastIndexOf("}");
-    if (lastBrace !== -1) {
-      const truncated = cleaned.substring(0, lastBrace + 1) + "]";
-      const start = truncated.indexOf("[");
+    if (lastBrace > 0) {
+      const start = cleaned.indexOf("[");
       if (start !== -1) {
-        const fixed = truncated.substring(start);
-        const parsed = JSON.parse(fixed);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          console.log("[Summarizer] 切り詰めパース成功:", parsed.length, "件");
-          return parsed;
+        const repaired = cleaned.substring(start, lastBrace + 1) + "]";
+        const result = JSON.parse(repaired);
+        if (Array.isArray(result) && result.length > 0) {
+          console.log("[Summarizer] 修復パース成功:", result.length, "件");
+          return result;
         }
       }
     }
   } catch { /* fall through */ }
 
-  // ステップ5: 元テキストから直接パース（コードブロックなしの場合）
-  try {
-    const direct = JSON.parse(text.trim());
-    if (Array.isArray(direct)) {
-      console.log("[Summarizer] 直接パース成功:", direct.length, "件");
-      return direct;
-    }
-  } catch { /* fall through */ }
-
-  console.log(
-    "[Summarizer] 全パース方法失敗. Raw先頭200:",
-    text.substring(0, 200),
-  );
+  console.log("[Summarizer] 全パース失敗, フォールバックへ. 先頭200:", cleaned.substring(0, 200));
   return [];
 }
 
@@ -196,15 +187,27 @@ function guessScore(article: RawArticle): number {
   return Math.min(100, Math.max(1, score));
 }
 
-/** タイトルが英語のみの場合に簡易的な日本語表示を生成 */
-function translateTitleSimple(title: string): string {
-  // 既に日本語を含む場合はそのまま
-  if (/[\u3000-\u9fff\u30A0-\u30FF\u3040-\u309F]/.test(title)) return title;
+/** タイトルが英語/中国語のみの場合に簡易的な日本語表示を生成 */
+function translateTitleSimple(title: string, source?: string): string {
+  const hasHiraganaKatakana = /[\u3040-\u309f\u30a0-\u30ff]/.test(title);
+  if (hasHiraganaKatakana) return title; // 日本語を含む→そのまま
+
+  // 漢字のみ（中国語の可能性）
+  const hasKanjiOnly = /[\u4e00-\u9fff]/.test(title) && !hasHiraganaKatakana;
+  if (hasKanjiOnly) return `【中国語】${title}`;
 
   // GitHub リポジトリ名（user/repo形式）
   if (/^[\w.-]+\/[\w.-]+$/.test(title)) {
-    const repoName = title.split("/").pop() || title;
-    return `GitHub: ${repoName.replace(/[-_]/g, " ")}（AI関連リポジトリ）`;
+    const repoName = (title.split("/").pop() || title).replace(/[-_]/g, " ");
+    return `GitHub: ${repoName}（AI関連リポジトリ）`;
+  }
+
+  // GitHub リポジトリ名 + 説明
+  if (source === "GitHub" && /^[\w.-]+\/[\w.-]+:/.test(title)) {
+    const parts = title.split(":");
+    const repoName = (parts[0].split("/").pop() || parts[0]).replace(/[-_]/g, " ");
+    const desc = parts.slice(1).join(":").trim();
+    return `GitHub: ${repoName} — ${desc || "AI関連リポジトリ"}`;
   }
 
   // "Show HN:" プレフィックス
@@ -220,7 +223,7 @@ function translateTitleSimple(title: string): string {
 function toFallback(article: RawArticle): ProcessedArticle {
   return {
     id: generateId(article.url),
-    title: translateTitleSimple(article.title),
+    title: translateTitleSimple(article.title, article.source),
     url: article.url,
     source: article.source,
     summary: "",
@@ -429,10 +432,10 @@ export async function summarizeAndClassify(
     results.push(...processed);
   }
 
-  // 最終チェック: 英語のみのタイトルに接尾辞を付ける
+  // 最終チェック: 英語/中国語のみのタイトルに接頭辞を付ける
   for (const article of results) {
-    if (!/[\u3000-\u9fff\u30A0-\u30FF\u3040-\u309F]/.test(article.title)) {
-      article.title = translateTitleSimple(article.title);
+    if (!/[\u3040-\u309f\u30a0-\u30ff]/.test(article.title)) {
+      article.title = translateTitleSimple(article.title, article.source);
     }
   }
 
