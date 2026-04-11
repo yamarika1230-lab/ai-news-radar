@@ -407,7 +407,7 @@ export async function summarizeAndClassify(
   const batches = chunk(rawArticles, BATCH_SIZE);
   const results: ProcessedArticle[] = [];
   const summarizerStart = Date.now();
-  const SUMMARIZER_TIMEOUT = 240_000; // 240秒（Vercel 300秒制限の80%）
+  const SUMMARIZER_TIMEOUT = 260_000; // 260秒（Vercel 300秒制限内）
 
   for (let b = 0; b < batches.length; b++) {
     // タイムアウトチェック
