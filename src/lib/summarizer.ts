@@ -19,7 +19,14 @@ const BATCH_SIZE = 10;
 // ---------------------------------------------------------------------------
 // システムプロンプト
 // ---------------------------------------------------------------------------
-const SYSTEM_PROMPT = `★★★ 最重要ルール ★★★
+const SYSTEM_PROMPT = `【絶対ルール - 全ての記事に適用】
+あなたが返すJSONの全ての"title"フィールドは、必ず日本語で記述してください。
+英語のタイトルをそのまま返すことは一切許可しません。
+英語の記事であっても、必ず日本語に翻訳してください。
+返す前に全てのtitleをチェックし、日本語（ひらがな・カタカナ・漢字）が
+1文字も含まれていないtitleがある場合、そのtitleを日本語に翻訳し直してください。
+
+★★★ 最重要ルール ★★★
 全ての記事のtitleは必ず日本語で出力してください。
 英語の記事タイトルをそのまま返すことは絶対に禁止です。
 必ず日本語に翻訳し、内容が端的にわかるタイトルにしてください。
@@ -348,19 +355,32 @@ export async function summarizeAndClassify(
 
   const batches = chunk(rawArticles, BATCH_SIZE);
   const results: ProcessedArticle[] = [];
+  const summarizerStart = Date.now();
+  const SUMMARIZER_TIMEOUT = 240_000; // 240秒（Vercel 300秒制限の80%）
 
   for (let b = 0; b < batches.length; b++) {
+    // タイムアウトチェック
+    if (Date.now() - summarizerStart > SUMMARIZER_TIMEOUT) {
+      console.log(
+        `[Summarizer] タイムアウト接近（${((Date.now() - summarizerStart) / 1000).toFixed(0)}秒）、残り${batches.length - b}バッチをフォールバック処理`,
+      );
+      // 残りはフォールバック
+      for (let r = b; r < batches.length; r++) {
+        results.push(...batches[r].map((a) => toFallback(a)));
+      }
+      break;
+    }
+
     const offset = b * BATCH_SIZE;
     console.log(
       `[Summarizer] バッチ ${b + 1}/${batches.length} (${batches[b].length}件)`,
     );
     const processed = await processBatch(batches[b], offset);
 
-    // バッチごとの成功/フォールバック統計
     const successCount = processed.filter((a) => a.summary.length > 0).length;
     const fallbackCount = processed.length - successCount;
     console.log(
-      `[Summarizer] バッチ ${b + 1}: 入力 ${batches[b].length}件, Claude成功: ${successCount}件, フォールバック: ${fallbackCount}件`,
+      `[Summarizer] バッチ ${b + 1}: Claude成功 ${successCount}件, フォールバック ${fallbackCount}件`,
     );
 
     results.push(...processed);

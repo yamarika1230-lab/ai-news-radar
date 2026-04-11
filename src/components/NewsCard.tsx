@@ -143,9 +143,13 @@ export default function NewsCard({ article }: { article: ProcessedArticle }) {
       {/* 展開エリア */}
       {expanded && (
         <div className="border-t border-[#E8E8E4] px-4 pb-4 pt-3">
-          {article.summary && (
+          {article.summary ? (
             <p className="mb-3 text-sm leading-relaxed text-[#6B6B68]">
               {article.summary}
+            </p>
+          ) : (
+            <p className="mb-3 text-sm italic text-[#A0A09C]">
+              要約を取得できませんでした。ソース記事をご確認ください。
             </p>
           )}
           <div className="flex flex-wrap items-center gap-3">

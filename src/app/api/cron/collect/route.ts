@@ -221,13 +221,14 @@ export async function GET(request: Request) {
       };
     }
 
-    console.log(`[cron] 全ソース合計: ${allRaw.length}件（重複除去前）`);
+    console.log("[cron] === 記事数追跡 ===");
+    console.log(`[cron] 1. 全ソース収集後: ${allRaw.length}件`);
 
     // -----------------------------------------------------------------------
     // 3. URL ベースで重複除去
     // -----------------------------------------------------------------------
     const unique = deduplicateByUrl(allRaw);
-    console.log(`[cron] 重複除去後: ${unique.length}件`);
+    console.log(`[cron] 2. 重複除去後: ${unique.length}件`);
 
     // -----------------------------------------------------------------------
     // 3.5. ソースごとの上限を適用してバランスを調整
@@ -251,12 +252,10 @@ export async function GET(request: Request) {
     };
 
     const balanced = balanceBySource(unique, SOURCE_LIMITS);
-    console.log(
-      `[cron] ソースバランス調整: ${unique.length} → ${balanced.length}件`,
-    );
+    console.log(`[cron] 3. ソースバランス調整後: ${balanced.length}件`);
 
-    // さらに全体で最大80件に絞る（スコア順）
-    const MAX_ARTICLES = 80;
+    // さらに全体で最大100件に絞る（スコア順）
+    const MAX_ARTICLES = 100;
     const prioritized =
       balanced.length > MAX_ARTICLES
         ? [...balanced]
@@ -269,11 +268,7 @@ export async function GET(request: Request) {
             .slice(0, MAX_ARTICLES)
         : balanced;
 
-    if (balanced.length > MAX_ARTICLES) {
-      console.log(
-        `[cron] 上位${MAX_ARTICLES}件に絞り込み（${unique.length} → ${prioritized.length}）`,
-      );
-    }
+    console.log(`[cron] 4. Summarizer入力: ${prioritized.length}件`);
 
     // -----------------------------------------------------------------------
     // 4. Claude API で要約・分類・スコアリング（リトライ1回）
@@ -283,11 +278,11 @@ export async function GET(request: Request) {
       "summarizeAndClassify",
     );
 
+    console.log(`[cron] 5. Summarizer出力: ${allArticles.length}件`);
+
     // スコア20以下の低品質記事を除外
     const articles = allArticles.filter((a) => a.score > 20);
-    console.log(
-      `[cron] Summarizer処理後: ${allArticles.length}件 → スコアフィルタ後: ${articles.length}件`,
-    );
+    console.log(`[cron] 6. スコアフィルタ後: ${articles.length}件`);
 
     // ソース別件数の内訳
     const sourceCounts: Record<string, number> = {};
