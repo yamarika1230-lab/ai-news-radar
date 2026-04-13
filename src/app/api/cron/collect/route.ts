@@ -339,14 +339,29 @@ export async function GET(request: Request) {
     }
 
     // -----------------------------------------------------------------------
-    // 6. ソースステータスを集計
+    // 6. ソースステータスを集計（最終保存件数ベース）
     // -----------------------------------------------------------------------
+    const SOURCE_GROUP: Record<string, string> = {
+      "日経クロステック": "RSS/Blogs",
+      "ITmedia AI+": "RSS/Blogs",
+      OpenAI: "RSS/Blogs",
+      "OpenAI Blog": "RSS/Blogs",
+      "Google AI": "RSS/Blogs",
+      "ZDNET Japan": "RSS/Blogs",
+    };
+
+    const finalCounts: Record<string, number> = {};
+    for (const a of articles) {
+      const group = SOURCE_GROUP[a.source] ?? a.source;
+      finalCounts[group] = (finalCounts[group] ?? 0) + 1;
+    }
+
     const sourceStatus: SourceStatus[] = collectors.map((c) => {
-      const result = sourceResults[c.name];
+      const count = finalCounts[c.name] ?? 0;
       return {
         name: c.name,
-        status: (result?.status as SourceStatus["status"]) ?? "error",
-        count: result?.count ?? 0,
+        status: count > 0 ? "ok" : (sourceResults[c.name]?.status as SourceStatus["status"]) ?? "warn",
+        count,
         lastRun: new Date().toISOString(),
       };
     });
