@@ -135,6 +135,12 @@ function parseClaudeResponse(text: string): unknown[] {
     cleaned = cleaned.substring(firstBracket, lastBracket + 1);
   }
 
+  // Step 2.5: JSON内の制御文字をエスケープ
+  cleaned = cleaned.replace(/[\x00-\x1f\x7f]/g, (ch) => {
+    if (ch === "\n" || ch === "\r" || ch === "\t") return ch;
+    return " ";
+  });
+
   // Step 3: パース試行
   try {
     const result = JSON.parse(cleaned);
@@ -158,6 +164,27 @@ function parseClaudeResponse(text: string): unknown[] {
           console.log("[Summarizer] 修復パース成功:", result.length, "件");
           return result;
         }
+      }
+    }
+  } catch { /* fall through */ }
+
+  // Step 5: 個別オブジェクト抽出（壊れたJSON内から有効なオブジェクトを回収）
+  try {
+    const objectPattern = /\{[^{}]*"index"\s*:\s*\d+[^{}]*\}/g;
+    const matches = cleaned.match(objectPattern);
+    if (matches && matches.length > 0) {
+      const recovered: unknown[] = [];
+      for (const objStr of matches) {
+        try {
+          const obj = JSON.parse(objStr) as Record<string, unknown>;
+          if (obj.index !== undefined && obj.title) {
+            recovered.push(obj);
+          }
+        } catch { /* skip */ }
+      }
+      if (recovered.length > 0) {
+        console.log("[Summarizer] 個別オブジェクト修復成功:", recovered.length, "件");
+        return recovered;
       }
     }
   } catch { /* fall through */ }

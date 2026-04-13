@@ -356,6 +356,8 @@ export async function GET(request: Request) {
       finalCounts[group] = (finalCounts[group] ?? 0) + 1;
     }
 
+    console.log(`[cron] ソースステータス最終件数: ${JSON.stringify(finalCounts)}`);
+
     const sourceStatus: SourceStatus[] = collectors.map((c) => {
       const count = finalCounts[c.name] ?? 0;
       return {
