@@ -445,57 +445,54 @@ export async function summarizeAndClassify(
       !a.title.startsWith("【中国語】"),
   );
 
-  if (untranslated.length > 0 && untranslated.length <= 15) {
+  if (untranslated.length > 0 && untranslated.length <= 20) {
     console.log(
-      `[Summarizer] 未翻訳記事の再翻訳: ${untranslated.length}件`,
+      `[Summarizer] 未翻訳記事の翻訳リトライ: ${untranslated.length}件`,
     );
     try {
+      // タイトルだけの軽量リクエスト（番号付きリストで返させる）
+      const titleList = untranslated
+        .map((a, i) => `${i}. ${a.title}`)
+        .join("\n");
+
       const retryMsg = await client.messages.create({
         model: MODEL,
-        max_tokens: 4096,
-        system: `以下の記事タイトルを全て日本語に翻訳してください。
-固有名詞（Google, OpenAI, Claude等）は英語のままでOK。
-JSON配列で返してください。形式: [{"index":0,"title":"日本語タイトル","summary":"日本語要約100文字"}]
-コードブロックで囲まないでください。純粋なJSON配列のみ返してください。`,
+        max_tokens: 2048,
         messages: [
           {
             role: "user",
-            content: JSON.stringify(
-              untranslated.map((a, i) => ({
-                index: i,
-                originalTitle: a.title,
-                source: a.source,
-              })),
-            ),
+            content: `以下の記事タイトルを全て日本語に翻訳してください。
+固有名詞（Google, OpenAI, Claude, GPT等）は英語のままでOK。
+同じ番号付きリスト形式で返してください。コードブロックで囲まないでください。
+
+${titleList}`,
           },
         ],
       });
 
       const retryText =
         retryMsg.content[0].type === "text" ? retryMsg.content[0].text : "";
-      const retryParsed = parseClaudeResponse(retryText) as {
-        index?: number;
-        title?: string;
-        summary?: string;
-      }[];
+      console.log(
+        `[Summarizer] リトライ結果先頭200: ${retryText.substring(0, 200)}`,
+      );
 
-      if (retryParsed.length > 0) {
-        console.log(
-          `[Summarizer] 再翻訳成功: ${retryParsed.length}件`,
-        );
-        for (const item of retryParsed) {
-          const idx = item.index ?? -1;
-          if (idx >= 0 && idx < untranslated.length && item.title) {
-            untranslated[idx].title = item.title;
-            if (item.summary && !untranslated[idx].summary) {
-              untranslated[idx].summary = item.summary;
-            }
-          }
+      // 番号付きリストから翻訳結果を抽出
+      const lines = retryText.split("\n").filter((l) => l.trim());
+      let matched = 0;
+      for (let i = 0; i < Math.min(lines.length, untranslated.length); i++) {
+        const translated = lines[i].replace(/^\d+\.\s*/, "").trim();
+        if (
+          translated &&
+          /[\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]/.test(translated)
+        ) {
+          untranslated[i].title = translated;
+          matched++;
         }
       }
+      console.log(`[Summarizer] リトライ翻訳反映: ${matched}件`);
     } catch (e) {
       console.log(
-        "[Summarizer] 再翻訳失敗:",
+        "[Summarizer] 翻訳リトライ失敗:",
         e instanceof Error ? e.message : e,
       );
     }

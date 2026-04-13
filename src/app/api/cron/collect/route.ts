@@ -84,7 +84,7 @@ function balanceBySource(
 
   const result: RawArticle[] = [];
   for (const [source, items] of Object.entries(bySource)) {
-    const limit = limits[source] ?? 15; // デフォルト15件
+    const limit = limits[source] ?? 5; // デフォルト5件
     // スコア順でソートして上位を選定
     const sorted = [...items].sort(
       (a, b) =>
@@ -234,21 +234,19 @@ export async function GET(request: Request) {
     // 3.5. ソースごとの上限を適用してバランスを調整
     // -----------------------------------------------------------------------
     const SOURCE_LIMITS: Record<string, number> = {
-      HackerNews: 10,
-      ProductHunt: 10,
-      GitHub: 10,
-      arXiv: 10,
-      "RSS/Blogs": 15,
-      "Google News": 10,
-      X: 20,
-      Qiita: 10,
-      note: 10,
-      "日経クロステック": 15,
-      OpenAI: 10,
-      "OpenAI Blog": 10,
-      "Google AI": 10,
-      "ITmedia AI+": 10,
-      "ZDNET Japan": 10,
+      HackerNews: 5,
+      ProductHunt: 2,
+      GitHub: 5,
+      arXiv: 5,
+      "RSS/Blogs": 5,
+      "Google News": 8,
+      X: 10,
+      Qiita: 5,
+      "日経クロステック": 5,
+      OpenAI: 3,
+      "Google AI": 3,
+      "ITmedia AI+": 5,
+      "ZDNET Japan": 3,
     };
 
     const balanced = balanceBySource(unique, SOURCE_LIMITS);
