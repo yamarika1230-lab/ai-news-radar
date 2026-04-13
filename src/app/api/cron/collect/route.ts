@@ -270,13 +270,24 @@ export async function GET(request: Request) {
 
     // -----------------------------------------------------------------------
     // 4. Claude API で要約・分類・スコアリング（リトライ1回）
+    //    タイムアウト時は処理済み分だけでも部分保存する
     // -----------------------------------------------------------------------
-    const allArticles = await withRetry(
-      () => summarizeAndClassify(prioritized),
-      "summarizeAndClassify",
-    );
+    let allArticles: Awaited<ReturnType<typeof summarizeAndClassify>>;
+    try {
+      allArticles = await withRetry(
+        () => summarizeAndClassify(prioritized),
+        "summarizeAndClassify",
+      );
+    } catch (summarizerError) {
+      console.error("[cron] Summarizer中断:", summarizerError);
+      // Summarizer が完全に失敗した場合、空配列でフォールバック
+      allArticles = [];
+    }
 
     console.log(`[cron] 5. Summarizer出力: ${allArticles.length}件`);
+
+    // Summarizer が 0件でも、処理を継続して空の DailyDigest を保存
+    // （前日のデータが古いまま残るよりは、空でも更新した方がよい）
 
     // スコア20以下の低品質記事を除外
     const articles = allArticles.filter((a) => a.score > 20);

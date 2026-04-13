@@ -166,9 +166,8 @@ export async function fetchTrendingSearches(): Promise<TrendingKeyword[]> {
   try {
     const params = new URLSearchParams({
       engine: "google_trends_trending_now",
-      frequency: "realtime",
       geo: "JP",
-      category: "t",
+      hl: "ja",
       api_key: apiKey,
     });
 
