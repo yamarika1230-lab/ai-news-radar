@@ -553,6 +553,82 @@ ${titleList}`,
 // メインエクスポート: extractTrendingKeywords
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// メインエクスポート: generateRelatedKeywords（Claude APIでAI文脈の関連語生成）
+// ---------------------------------------------------------------------------
+
+export async function generateRelatedKeywords(
+  keywords: string[],
+): Promise<Record<string, { keyword: string; searchUrl: string }[]>> {
+  if (keywords.length === 0) return {};
+
+  try {
+    const message = await client.messages.create({
+      model: MODEL,
+      max_tokens: 2048,
+      messages: [
+        {
+          role: "user",
+          content: `以下はAI/テクノロジー分野のトレンドキーワードです。
+各キーワードについて、AI・テクノロジー文脈での関連キーワードを5つずつ日本語で生成してください。
+一般的な意味ではなく、必ずAI/テクノロジーの文脈に沿った関連語にしてください。
+
+例:
+- "RAG" → ["RAG とは", "Retrieval-Augmented Generation", "RAG ベクトルDB", "RAG チャンク分割", "RAG 精度向上"]
+- "Claude" → ["Claude 4", "Anthropic", "Claude Code", "Claude API", "Claude vs ChatGPT"]
+
+キーワード: ${keywords.join(", ")}
+
+JSON形式で返してください。コードブロックで囲まないでください:
+{"キーワード1":["関連語1","関連語2","関連語3","関連語4","関連語5"],...}`,
+        },
+      ],
+    });
+
+    const block = message.content[0];
+    if (block.type !== "text") return {};
+
+    const text = block.text.trim();
+    // コードブロック除去
+    const cleaned =
+      text.match(/```(?:json)?\s*\n?([\s\S]*?)```/)?.[1]?.trim() ?? text;
+    // { } を探す
+    const braceStart = cleaned.indexOf("{");
+    const braceEnd = cleaned.lastIndexOf("}");
+    if (braceStart === -1 || braceEnd === -1) return {};
+
+    const data = JSON.parse(
+      cleaned.substring(braceStart, braceEnd + 1),
+    ) as Record<string, string[]>;
+
+    const result: Record<string, { keyword: string; searchUrl: string }[]> =
+      {};
+    for (const [kw, related] of Object.entries(data)) {
+      if (Array.isArray(related)) {
+        result[kw] = related.slice(0, 5).map((r) => ({
+          keyword: String(r),
+          searchUrl: `https://www.google.com/search?q=${encodeURIComponent(String(r))}`,
+        }));
+      }
+    }
+
+    console.log(
+      `[Summarizer] 関連キーワード生成: ${Object.keys(result).length}キーワード分`,
+    );
+    return result;
+  } catch (error) {
+    console.log(
+      "[Summarizer] 関連キーワード生成失敗:",
+      error instanceof Error ? error.message : error,
+    );
+    return {};
+  }
+}
+
+// ---------------------------------------------------------------------------
+// メインエクスポート: extractTrendingKeywords
+// ---------------------------------------------------------------------------
+
 const TRENDING_SYSTEM_PROMPT = `トレンドキーワードを抽出してください。
 上位10件、技術用語/プロダクト名/企業名を対象。
 出力は純粋なJSON配列のみ。`;

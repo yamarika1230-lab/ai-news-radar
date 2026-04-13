@@ -10,8 +10,8 @@ import xApi from "@/lib/collectors/x-api";
 import serpapi from "@/lib/collectors/serpapi";
 import qiita from "@/lib/collectors/qiita";
 // import noteCollector from "@/lib/collectors/note"; // VercelのIPがnoteにブロック
-import { fetchGoogleTrends, fetchRelatedKeywords } from "@/lib/collectors/serpapi";
-import { summarizeAndClassify, extractTrendingKeywords } from "@/lib/summarizer";
+import { fetchGoogleTrends } from "@/lib/collectors/serpapi";
+import { summarizeAndClassify, extractTrendingKeywords, generateRelatedKeywords } from "@/lib/summarizer";
 import { saveDailyDigest, updateSourceStatus } from "@/lib/storage";
 import type { Collector, RawArticle, SourceStatus, TrendingKeyword } from "@/lib/types";
 import dayjs from "dayjs";
@@ -318,24 +318,19 @@ export async function GET(request: Request) {
       return extractNum(b.change) - extractNum(a.change);
     });
 
-    // 上位10キーワードの関連キーワードを取得（API上限ガード付き）
-    const maxRelatedQueries = 10;
-    let queriesUsed = 0;
-    for (let k = 0; k < Math.min(10, trendingKeywords.length); k++) {
-      if (queriesUsed >= maxRelatedQueries) {
-        console.log("[Trends] 関連キーワード取得上限到達、残りはスキップ");
-        break;
-      }
+    // Claude API で AI 文脈の関連キーワードを一括生成
+    const topKwNames = trendingKeywords.slice(0, 10).map((k) => k.keyword);
+    if (topKwNames.length > 0) {
       try {
-        const related = await fetchRelatedKeywords(trendingKeywords[k].keyword);
-        if (related.length > 0) {
-          trendingKeywords[k].relatedKeywords = related;
+        const relatedMap = await generateRelatedKeywords(topKwNames);
+        for (const kw of trendingKeywords) {
+          if (relatedMap[kw.keyword]) {
+            kw.relatedKeywords = relatedMap[kw.keyword];
+          }
         }
-        queriesUsed++;
-      } catch {
-        console.log(`[Trends] 関連キーワード取得失敗: ${trendingKeywords[k].keyword}`);
+      } catch (e) {
+        console.log("[Trends] 関連キーワード生成失敗:", e);
       }
-      await new Promise((resolve) => setTimeout(resolve, 200));
     }
 
     // -----------------------------------------------------------------------
