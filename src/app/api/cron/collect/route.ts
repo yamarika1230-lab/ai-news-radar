@@ -10,8 +10,8 @@ import xApi from "@/lib/collectors/x-api";
 import serpapi from "@/lib/collectors/serpapi";
 import qiita from "@/lib/collectors/qiita";
 // import noteCollector from "@/lib/collectors/note"; // VercelのIPがnoteにブロック
-import { fetchGoogleTrends } from "@/lib/collectors/serpapi";
-import { summarizeAndClassify, extractTrendingKeywords, generateRelatedKeywords } from "@/lib/summarizer";
+// import { fetchGoogleTrends } from "@/lib/collectors/serpapi"; // Claude API方式に移行
+import { summarizeAndClassify, extractTrendingKeywords } from "@/lib/summarizer";
 import { saveDailyDigest, updateSourceStatus } from "@/lib/storage";
 import type { Collector, RawArticle, SourceStatus, TrendingKeyword } from "@/lib/types";
 import dayjs from "dayjs";
@@ -200,13 +200,7 @@ export async function GET(request: Request) {
     // -----------------------------------------------------------------------
     // 2. 全コレクターを並列実行 + Google Trends
     // -----------------------------------------------------------------------
-    const [collectorResults, serpTrends] = await Promise.all([
-      runCollectorsWithTimeout(collectors),
-      fetchGoogleTrends().catch((err) => {
-        console.log("[cron] Google Trends 取得失敗:", err);
-        return [] as TrendingKeyword[];
-      }),
-    ]);
+    const collectorResults = await runCollectorsWithTimeout(collectors);
 
     // 結果を結合
     const allRaw: RawArticle[] = [];
@@ -301,48 +295,15 @@ export async function GET(request: Request) {
     console.log(`[cron] ソース別件数: ${JSON.stringify(sourceCounts)}`);
 
     // -----------------------------------------------------------------------
-    // 5. トレンドキーワード:
-    //    SerpApi の結果があればそれを優先、なければ Claude API で推定
+    // 5. トレンドキーワード: 処理済み記事からClaude APIで生成
+    //    （キーワード + 関連語 + スコアを1回のAPI呼び出しで取得）
     // -----------------------------------------------------------------------
-    let trendingKeywords: TrendingKeyword[];
-
-    if (serpTrends.length > 0) {
-      console.log(
-        `[cron] トレンドキーワード: Google Trends (${serpTrends.length}件)`,
-      );
-      trendingKeywords = serpTrends;
-    } else {
-      console.log("[cron] トレンドキーワード: Claude API で推定");
-      trendingKeywords = await withRetry(
-        () => extractTrendingKeywords(articles),
-        "extractTrendingKeywords",
-      );
-    }
-
-    // 急上昇率で降順ソート
-    trendingKeywords.sort((a, b) => {
-      const extractNum = (change: string): number => {
-        if (change.includes("急上昇") || change.includes("Breakout")) return 9999;
-        const m = change.match(/([+-]?\d+)/);
-        return m ? parseInt(m[1]) : 0;
-      };
-      return extractNum(b.change) - extractNum(a.change);
-    });
-
-    // Claude API で AI 文脈の関連キーワードを一括生成
-    const topKwNames = trendingKeywords.slice(0, 10).map((k) => k.keyword);
-    if (topKwNames.length > 0) {
-      try {
-        const relatedMap = await generateRelatedKeywords(topKwNames);
-        for (const kw of trendingKeywords) {
-          if (relatedMap[kw.keyword]) {
-            kw.relatedKeywords = relatedMap[kw.keyword];
-          }
-        }
-      } catch (e) {
-        console.log("[Trends] 関連キーワード生成失敗:", e);
-      }
-    }
+    console.log("[cron] トレンドキーワード: Claude APIで記事から生成");
+    const trendingKeywords = await withRetry(
+      () => extractTrendingKeywords(articles),
+      "extractTrendingKeywords",
+    );
+    console.log(`[cron] トレンドキーワード: ${trendingKeywords.length}件`);
 
     // -----------------------------------------------------------------------
     // 6. ソースステータスを集計（最終保存件数ベース）
@@ -430,7 +391,7 @@ export async function GET(request: Request) {
         processed: articles.length,
       },
       trendingKeywords: trendingKeywords.length,
-      trendingSource: serpTrends.length > 0 ? "google_trends" : "claude",
+      trendingSource: "claude",
       sources: sourceResults,
       elapsedSeconds: Number(elapsed),
     });
